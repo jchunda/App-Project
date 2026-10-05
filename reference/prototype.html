@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Usambazi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:light;
+  --bg:#F1F5F1; --surface:#FFFFFF; --surface-2:#E7EEE8; --ink:#13221B; --muted:#53655B;
+  --line:#D4DDD6; --line-strong:#AFBFB4;
+  --primary:#0E5C43; --on-primary:#FFFFFF; --bar:#0D4F3A; --on-bar:#FFFFFF;
+  --copper:#A5561B; --copper-light:#D9A57A; --copper-soft:#F5E6D8; --copper-ink:#6E3510;
+  --ok:#16703E; --ok-bg:#DFF0E4; --wait:#975400; --wait-bg:#FBEACF; --bad:#B3261E; --bad-bg:#FADFDB;
+  --info-bg:#E2ECF5; --focus:#C98A10;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0E1814; --surface:#16231D; --surface-2:#1E2E26; --ink:#E5EEE8; --muted:#9CB0A4;
+    --line:#2A3B33; --line-strong:#466055;
+    --primary:#45B98D; --on-primary:#06231A; --bar:#0F3A2C; --on-bar:#F1F7F3;
+    --copper:#D98B4E; --copper-light:#8A5226; --copper-soft:#2B2017; --copper-ink:#F0BC92;
+    --ok:#6FD39A; --ok-bg:#173826; --wait:#F2B866; --wait-bg:#3A2B12; --bad:#FF8C80; --bad-bg:#40201C;
+    --info-bg:#1B2A38; --focus:#F2B866;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E1814; --surface:#16231D; --surface-2:#1E2E26; --ink:#E5EEE8; --muted:#9CB0A4;
+  --line:#2A3B33; --line-strong:#466055;
+  --primary:#45B98D; --on-primary:#06231A; --bar:#0F3A2C; --on-bar:#F1F7F3;
+  --copper:#D98B4E; --copper-light:#8A5226; --copper-soft:#2B2017; --copper-ink:#F0BC92;
+  --ok:#6FD39A; --ok-bg:#173826; --wait:#F2B866; --wait-bg:#3A2B12; --bad:#FF8C80; --bad-bg:#40201C;
+  --info-bg:#1B2A38; --focus:#F2B866;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+h1,h2,h3{font-family:"Bricolage Grotesque","Atkinson Hyperlegible",system-ui,sans-serif;line-height:1.15;margin:0;font-weight:800;letter-spacing:-0.01em}
+p{margin:0}
+img,svg{max-width:100%}
+button{font:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.muted{color:var(--muted)}
+.num{font-variant-numeric:tabular-nums}
+
+/* Top bar */
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:var(--bar);color:var(--on-bar)}
+.topbar-inner{max-width:1100px;margin:0 auto;padding:10px 16px 12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+.brand-row{display:flex;align-items:baseline;gap:10px}
+.brand{background:none;border:0;color:inherit;padding:0;cursor:pointer;font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:26px;letter-spacing:-0.025em}
+.proto{font-size:12.5px;opacity:.8}
+.viewas{display:flex;align-items:center;gap:8px;font-size:14px}
+.seg{display:inline-flex;background:rgba(255,255,255,.13);border-radius:999px;padding:3px}
+.seg button{border:0;background:transparent;color:inherit;font-size:14px;padding:6px 12px;border-radius:999px;min-height:36px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:#FFFFFF;color:#0D4F3A;font-weight:700}
+.who{width:100%;font-size:14px;opacity:.92}
+
+/* Layout */
+.layout{max-width:1100px;margin:0 auto}
+.content{padding:16px 16px calc(100px + env(safe-area-inset-bottom,0px));max-width:760px;margin:0 auto;outline:none}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:25;background:var(--surface);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(6,1fr);padding:4px 2px calc(4px + env(safe-area-inset-bottom,0px))}
+.nav button{position:relative;background:none;border:0;color:var(--muted);font-size:11.5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 0;min-height:56px;cursor:pointer;border-radius:10px}
+.nav button[aria-current="page"]{color:var(--primary);font-weight:700}
+.nav svg{width:24px;height:24px}
+.badge{position:absolute;top:3px;left:calc(50% + 6px);min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--bad);color:#fff;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+@media (min-width:900px){
+  .layout.has-nav{display:grid;grid-template-columns:230px minmax(0,1fr);gap:28px;padding:0 16px}
+  .nav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 96px);align-self:start;display:flex;flex-direction:column;gap:2px;border:0;background:transparent;padding:24px 0}
+  .nav button{flex-direction:row;justify-content:flex-start;gap:12px;font-size:15.5px;padding:10px 14px;min-height:46px}
+  .nav button[aria-current="page"]{background:var(--surface);box-shadow:inset 3px 0 0 var(--primary)}
+  .badge{position:static;margin-left:auto}
+  .content{padding-bottom:56px}
+  .layout.has-nav .content{margin:0;padding-left:0;padding-right:0}
+}
+
+/* Headings and sections */
+.back{display:inline-flex;align-items:center;gap:4px;background:none;border:0;color:var(--primary);font-weight:700;padding:8px 0;cursor:pointer;min-height:44px}
+.back svg{width:18px;height:18px}
+.group-head h1{font-size:clamp(24px,6.4vw,30px)}
+.group-sub{color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.type-badge{display:inline-flex;align-items:center;gap:5px;background:var(--surface-2);color:var(--ink);font-weight:700;font-size:13.5px;padding:3px 10px;border-radius:6px}
+.type-badge svg{width:14px;height:14px}
+.page-title{font-size:clamp(28px,8vw,36px);margin-top:8px}
+.lede{color:var(--muted);margin-top:8px;max-width:60ch}
+.section{margin-top:28px}
+.section > h2,.screen-head h2{font-size:21px}
+.section > .sub{color:var(--muted);margin-top:4px;font-size:15px}
+.screen-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}
+
+/* Lists */
+.list{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:12px}
+.list > * + *{border-top:1px solid var(--line)}
+.row{padding:13px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.row .right{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.meta{color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.role-tag{display:inline-block;font-size:12.5px;font-weight:700;color:var(--primary);border:1.5px solid currentColor;border-radius:6px;padding:0 6px;margin-left:6px;vertical-align:2px}
+
+/* Home group rows */
+.grow{width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:left;background:var(--surface);border:0;color:inherit;padding:16px;cursor:pointer}
+.grow:hover{background:var(--surface-2)}
+.grow-name{display:block;font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:19px;line-height:1.2}
+.grow-meta{display:block;color:var(--muted);font-size:14.5px;margin:3px 0 6px}
+.grow-amt{text-align:right;font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:20px;white-space:nowrap}
+.grow-amt small{display:block;font-family:"Atkinson Hyperlegible",system-ui,sans-serif;font-weight:400;font-size:13px;color:var(--muted)}
+
+/* Where is the money */
+.money{background:var(--copper-soft);border-radius:22px;padding:20px 18px 18px;margin-top:18px}
+.money h2{font-size:18px;color:var(--copper-ink)}
+.money-total{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:clamp(42px,12vw,60px);letter-spacing:-0.035em;line-height:1;margin-top:10px;font-variant-numeric:tabular-nums}
+.money-sub{color:var(--muted);margin-top:4px}
+.mbar{display:flex;height:22px;border-radius:999px;overflow:hidden;background:var(--line);margin:16px 0 10px}
+.mbar span{display:block;height:100%}
+.sw-bank{background:var(--primary)}
+.sw-momo{background:var(--copper)}
+.sw-cash{background:repeating-linear-gradient(135deg,var(--copper) 0 5px,var(--copper-light) 5px 10px)}
+.legend{list-style:none;margin:0;padding:0}
+.legend li{display:grid;grid-template-columns:16px 1fr auto;gap:10px;align-items:center;padding:7px 0}
+.legend li + li{border-top:1px solid rgba(110,53,16,.15)}
+.legend .sw{width:16px;height:16px;border-radius:4px}
+.legend .amt{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.legend .pct{display:block;font-size:12.5px;color:var(--muted);font-weight:400}
+.warn{background:var(--surface);border-left:4px solid var(--wait);border-radius:10px;padding:12px 14px;margin-top:14px}
+.warn p + p,.warn p + .btn{margin-top:8px}
+
+/* Status pills */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;line-height:1.5}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.wait{background:var(--wait-bg);color:var(--wait)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.none{background:var(--surface-2);color:var(--muted)}
+
+/* Attention list */
+.att{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;background:var(--surface);border:0;color:inherit;padding:13px 16px;cursor:pointer}
+.att:hover{background:var(--surface-2)}
+.att .dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:7px}
+.att .dot.bad{background:var(--bad)} .att .dot.wait{background:var(--wait)} .att .dot.ok{background:var(--ok)}
+.att strong{display:block}
+.att span.meta{display:block}
+
+/* Progress */
+.progress{height:10px;background:var(--surface-2);border-radius:999px;overflow:hidden;margin-top:10px}
+.progress span{display:block;height:100%;background:var(--ok)}
+.month-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.big{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:26px;font-variant-numeric:tabular-nums}
+
+/* Entries */
+.entry{padding:14px 16px}
+.entry-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.entry .amt{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:21px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.entry.superseded .amt{text-decoration:line-through;color:var(--muted)}
+.entry .meta{margin-top:4px}
+.entry-status{margin-top:8px}
+.note{border-radius:8px;padding:8px 11px;font-size:14.5px;margin-top:8px}
+.note.bad{background:var(--bad-bg)}
+.note.info{background:var(--info-bg)}
+.note.plain{background:var(--surface-2);color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-top:16px;background:var(--surface-2);padding:4px;border-radius:12px}
+.tabs button{flex:1;border:0;background:transparent;color:var(--muted);padding:9px 10px;border-radius:9px;cursor:pointer;min-height:44px;font-weight:700}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.filter{display:flex;align-items:center;gap:10px;margin-top:12px}
+.filter label{margin:0;font-weight:400;color:var(--muted);white-space:nowrap}
+.filter select{max-width:280px}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 20px;border-radius:12px;border:1.5px solid var(--primary);background:var(--primary);color:var(--on-primary);font-weight:700;cursor:pointer;text-decoration:none;text-align:center}
+.btn.ghost{background:transparent;color:var(--primary)}
+.btn.small{min-height:42px;padding:0 14px;font-size:15px}
+.btn.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.danger-ghost{background:transparent;color:var(--bad);border-color:var(--bad)}
+.btn.block{width:100%}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.linkbtn{background:none;border:0;color:var(--primary);font-weight:700;text-decoration:underline;text-underline-offset:3px;padding:8px 0;cursor:pointer;min-height:40px}
+
+/* Forms */
+.formcard{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:6px 16px 18px;margin-top:14px}
+.field{margin-top:16px}
+.field > label,.field > .label{display:block;font-weight:700;margin-bottom:6px}
+.hint{font-size:14px;color:var(--muted);margin-top:5px}
+input[type=text],input[type=number],input[type=date],input[type=tel],select,textarea{width:100%;font:inherit;font-size:16px;min-height:48px;padding:10px 12px;border:1.5px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--ink)}
+textarea{min-height:90px;resize:vertical}
+input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"]{border-color:var(--bad)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{position:relative}
+.chip input{position:absolute;opacity:0;width:1px;height:1px}
+.chip span{display:inline-flex;align-items:center;min-height:44px;padding:0 15px;border:1.5px solid var(--line-strong);border-radius:999px;cursor:pointer;background:var(--surface)}
+.chip input:checked + span{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:700}
+.chip input:focus-visible + span{outline:3px solid var(--focus);outline-offset:2px}
+.typecards{display:grid;gap:10px}
+@media (min-width:560px){.typecards{grid-template-columns:1fr 1fr}}
+.typecard{position:relative;display:block}
+.typecard input{position:absolute;opacity:0;width:1px;height:1px}
+.typecard .tc{display:block;border:1.5px solid var(--line-strong);border-radius:14px;padding:14px;cursor:pointer;height:100%;background:var(--surface)}
+.typecard .tc strong{display:block;font-family:"Bricolage Grotesque",system-ui,sans-serif;font-size:18px}
+.typecard .tc span{display:block;color:var(--muted);font-size:14.5px;margin-top:4px}
+.typecard input:checked + .tc{border-color:var(--primary);box-shadow:inset 0 0 0 1.5px var(--primary);background:var(--ok-bg)}
+.typecard input:focus-visible + .tc{outline:3px solid var(--focus);outline-offset:2px}
+.errors{background:var(--bad-bg);color:var(--bad);border-radius:10px;padding:11px 14px;margin-top:14px;font-weight:700}
+.errors ul{margin:4px 0 0;padding-left:18px;font-weight:400;color:var(--ink)}
+.infobox{background:var(--info-bg);border-radius:10px;padding:12px 14px;margin-top:14px}
+.warnbox{background:var(--wait-bg);border-radius:10px;padding:12px 14px;margin-top:14px}
+.mrow{display:grid;grid-template-columns:1fr;gap:8px;padding:12px 0;border-top:1px solid var(--line)}
+.mrow:first-of-type{border-top:0}
+@media (min-width:560px){.mrow{grid-template-columns:1.4fr 1fr 1fr auto;align-items:end}}
+.mrow .x{min-height:48px}
+.srcrow{display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.srcrow:first-of-type{border-top:0}
+.form-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+
+/* Requests */
+.req{padding:15px 16px}
+.req-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.req h3{font-size:17.5px}
+.votes{list-style:none;padding:0;margin:10px 0 0}
+.votes li{font-size:14.5px;padding:3px 0;display:flex;gap:8px}
+.votes .v-yes{color:var(--ok);font-weight:700}
+.votes .v-no{color:var(--bad);font-weight:700}
+.rule{font-size:14px;color:var(--muted);margin-top:6px}
+
+/* Rotation */
+.rot{list-style:none;margin:12px 0 0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.rot li{display:grid;grid-template-columns:40px 1fr;gap:12px;padding:12px 16px;align-items:center}
+.rot li + li{border-top:1px solid var(--line)}
+.rot .n{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;background:var(--surface-2);color:var(--muted);font-variant-numeric:tabular-nums}
+.rot li.done .n{background:var(--ok-bg);color:var(--ok)}
+.rot li.now{background:var(--copper-soft)}
+.rot li.now .n{background:var(--copper);color:#fff}
+.rot .rname{font-weight:700}
+.rot .rinfo{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-top:2px}
+.hero{background:var(--copper-soft);border-radius:20px;padding:18px;margin-top:16px}
+.hero h2{font-size:22px;color:var(--copper-ink)}
+.hero .who-big{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:clamp(28px,8vw,38px);letter-spacing:-0.02em;margin-top:6px;line-height:1.1}
+
+/* Share-out */
+.calc{list-style:none;margin:12px 0 0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.calc li{display:flex;justify-content:space-between;gap:12px;padding:11px 16px}
+.calc li + li{border-top:1px solid var(--line)}
+.calc li.total{font-weight:700;background:var(--surface-2)}
+.calc .v{font-variant-numeric:tabular-nums;white-space:nowrap}
+.steps{margin:10px 0 0;padding-left:22px}
+.steps li{padding:3px 0}
+details.share{padding:0}
+details.share summary{list-style:none;cursor:pointer;padding:13px 16px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}
+details.share summary::-webkit-details-marker{display:none}
+details.share summary .pct{color:var(--muted);font-size:14px}
+details.share summary .get{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+details.share summary .open-hint{font-size:13.5px;color:var(--primary);font-weight:700}
+details.share[open] summary{background:var(--surface-2)}
+details.share .body{padding:6px 16px 14px}
+.future{border:1.5px dashed var(--line-strong);border-radius:12px;padding:12px 14px;margin-top:16px;color:var(--muted)}
+
+/* Type lock */
+.typelock{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-top:12px}
+.typelock svg{width:22px;height:22px;flex:none;margin-top:2px;color:var(--muted)}
+
+/* History */
+.hentry{padding:12px 16px;display:grid;grid-template-columns:1fr;gap:2px}
+.hentry .who-line{font-weight:700}
+.hentry .when{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* Modal and toast */
+.overlay{position:fixed;inset:0;z-index:50;background:rgba(5,15,10,.5);display:flex;align-items:flex-end;justify-content:center}
+.dialog{background:var(--surface);color:var(--ink);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:90%;overflow:auto}
+.dialog h2{font-size:21px}
+.dialog-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+@media (min-width:640px){.overlay{align-items:center}.dialog{border-radius:20px}}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;z-index:60;max-width:calc(100% - 32px);font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast[hidden]{display:none}
+@media (min-width:900px){.toast{bottom:28px}}
+@media (prefers-reduced-motion:no-preference){.toast{animation:pop .18s ease-out}@keyframes pop{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}}
+.empty{padding:22px 16px;color:var(--muted);text-align:center}
+
+/* Version 2 additions */
+.viewas label{font-size:14px}
+.viewas select{width:auto;max-width:68vw;min-height:38px;padding:4px 12px;border-radius:999px;border:0;background:#FFFFFF;color:#0D4F3A;font-weight:700;font-size:15px}
+.sw-lent{background:repeating-linear-gradient(135deg,var(--primary) 0 5px,var(--surface) 5px 10px)}
+.nav .desk{display:none}
+@media (min-width:900px){.nav .desk{display:flex}}
+.calcbox{background:var(--info-bg);border-radius:12px;padding:12px 14px;margin-top:16px}
+.calcbox h3{font-size:17px}
+.calcbox .steps{margin-top:6px}
+.loan{padding:15px 16px}
+.loan-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.loan h3{font-size:18px}
+.loan .calc{margin-top:10px}
+.loan .calc li{padding:8px 14px;font-size:15px}
+.rp{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.rp:first-child{border-top:0}
+.rules{display:grid;gap:8px;margin-top:12px}
+@media (min-width:560px){.rules{grid-template-columns:repeat(3,1fr)}}
+.rule-item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.rule-item strong{display:block;font-family:"Bricolage Grotesque",system-ui,sans-serif;font-size:20px}
+.rule-item span{color:var(--muted);font-size:14px}
+.lock-note{display:flex;gap:8px;align-items:flex-start;color:var(--muted);font-size:14.5px;margin-top:10px}
+.lock-note svg{width:18px;height:18px;flex:none;margin-top:2px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal-root"></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script>
+(function(){
+'use strict';
+
+/* ---------- Basic helpers ---------- */
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const SM=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const METHODS=[
+  {id:'airtel',label:'Airtel Money',loc:'momo',needsRef:true,hint:'Copy it from the Airtel Money message, e.g. MP261003.0914.A47215'},
+  {id:'mtn',label:'MTN MoMo',loc:'momo',needsRef:true,hint:'Copy it from the MTN MoMo message, e.g. 4471029385'},
+  {id:'zamtel',label:'Zamtel Kwacha',loc:'momo',needsRef:true,hint:'Copy it from the Zamtel Kwacha message, e.g. ZK20481937'},
+  {id:'cash',label:'Cash',loc:'cash',needsRef:false,hint:''},
+  {id:'bank',label:'Bank',loc:'bank',needsRef:false,hint:'The number on the bank deposit slip (optional).'}
+];
+const M=id=>METHODS.find(m=>m.id===id);
+const ROLE={chair:'Chairperson',vice:'Vice Chairperson',treasurer:'Treasurer',comms:'Communications',rep:'Member representative',member:'Member'};
+const ROLE_ORDER=['chair','vice','treasurer','comms','rep','member'];
+const TYPE={chilimba:'Chilimba',village:'Village Banking'};
+const MAXM={chilimba:20,village:35};
+const MINM=5, MIN_COMMITTEE=4;
+
+const S={groups:[],gid:null,role:'treasurer',screen:'home',payTab:'mine',payMonth:'all',histLimit:40,draft:null,reqKind:null,modalSave:null};
+
+let uid=100; const nid=p=>p+(uid++);
+let sd=20261003; const rnd=()=>{sd=(sd*1103515245+12345)%2147483648;return sd/2147483648};
+const dg=n=>{let s='';for(let i=0;i<n;i++)s+=Math.floor(rnd()*10);return s};
+const p2=n=>String(n).padStart(2,'0');
+function makeRef(method,d){
+  if(method==='airtel')return 'MP'+String(d.getFullYear()).slice(2)+p2(d.getMonth()+1)+p2(d.getDate())+'.'+p2(d.getHours())+p2(d.getMinutes())+'.'+'ABCDEFGHJK'[Math.floor(rnd()*10)]+dg(5);
+  if(method==='mtn')return String(1+Math.floor(rnd()*9))+dg(9);
+  if(method==='zamtel')return 'ZK'+dg(8);
+  if(method==='bank')return 'Slip '+dg(6);
+  return '';
+}
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const r2=n=>Math.round(n*100)/100;
+const fmtK=n=>{const v=r2(n);const a=Math.abs(v);return (v<0?'−':'')+'K'+a.toLocaleString('en-US',{minimumFractionDigits:a%1?2:0,maximumFractionDigits:2})};
+const fmtD=d=>d.getDate()+' '+SM[d.getMonth()]+' '+d.getFullYear();
+const fmtDT=d=>fmtD(d)+', '+p2(d.getHours())+':'+p2(d.getMinutes());
+const sum=(a,f)=>a.reduce((t,x)=>t+(f?f(x):x),0);
+const at=(g,m,day,h,mi)=>new Date(g.startY,g.startM+m-1,day,h,mi||0);
+const monthLabel=(g,m)=>{const d=new Date(g.startY,g.startM+m-1,1);return MONTHS[d.getMonth()]+' '+d.getFullYear()};
+const mLabel=(g,m)=>'Month '+m+' ('+monthLabel(g,m)+')';
+const plural=(n,one,many)=>n+' '+(n===1?one:many);
+const normRef=r=>String(r||'').toUpperCase().replace(/\s+/g,'');
+const pctTxt=n=>(Math.round(n*10)/10).toString().replace(/\.0$/,'')+'%';
+
+/* ---------- Group data helpers ---------- */
+const cur=()=>S.groups.find(g=>g.id===S.gid)||null;
+const mem=(g,id)=>g.members.find(m=>m.id===id);
+const nm=(g,id)=>id?((mem(g,id)||{}).name||'Someone'):'Usambazi';
+const first=(g,id)=>nm(g,id).split(' ')[0];
+const byRole=(g,r)=>g.members.find(m=>m.role===r);
+const treasurerId=g=>byRole(g,'treasurer').id;
+function viewerId(g){
+  if(S.role!=='member'){const m=byRole(g,S.role);if(m)return m.id}
+  return g.memberView||(byRole(g,'member')||g.members[0]).id;
+}
+const viewer=g=>mem(g,viewerId(g));
+const isAdminId=(g,id)=>{const m=mem(g,id);return !!m&&m.role!=='member'};
+const isAdm=g=>viewer(g).role!=='member';
+const isT=g=>viewer(g).role==='treasurer';
+const isComms=g=>viewer(g).role==='comms';
+const privateView=g=>g.type==='village'&&!isAdm(g);
+const committee=g=>g.members.filter(m=>m.role!=='member');
+const active=g=>g.contributions.filter(c=>!c.supersededBy);
+function hist(g,actor,text,time,subject){g.history.push({id:nid('h'),actor,text,time:time||new Date(),subject:subject||null})}
+const histVisible=(g,h)=>!privateView(g)||!h.subject||h.subject===viewerId(g);
+
+function monthStatus(g,mid,m){
+  const list=active(g).filter(c=>c.memberId===mid&&c.month===m);
+  if(!list.length)return {status:'notpaid',amount:0,confirmed:0};
+  let st='confirmed';
+  if(list.some(c=>c.status==='disputed'))st='disputed';
+  else if(list.some(c=>c.status==='waiting'))st='waiting';
+  return {status:st,amount:sum(list,c=>c.amount),confirmed:sum(list.filter(c=>c.status==='confirmed'),c=>c.amount)};
+}
+const savedBy=(g,id)=>r2(sum(active(g).filter(c=>c.memberId===id&&c.status==='confirmed'),c=>c.amount));
+const savedConfirmed=g=>r2(sum(active(g).filter(c=>c.status==='confirmed'),c=>c.amount));
+
+/* ---------- Loan maths (flat interest, interest paid first) ---------- */
+function lcalc(g,l){
+  const rate=g.loanRate/100;
+  const interest=r2(l.amount*rate*l.months);
+  const total=r2(l.amount+interest);
+  const monthly=r2(total/l.months);
+  const paid=r2(sum(l.repayments,r=>r.amount));
+  const paidConf=r2(sum(l.repayments.filter(r=>r.status==='confirmed'),r=>r.amount));
+  const remaining=r2(Math.max(0,total-paid));
+  const interestPaid=r2(Math.min(paid,interest));
+  const interestConf=r2(Math.min(paidConf,interest));
+  const principalPaid=r2(Math.max(0,paid-interest));
+  const outstanding=l.sentAt?r2(Math.max(0,l.amount-principalPaid)):0;
+  const dueMonth=l.startMonth?l.startMonth+l.months:null;
+  const overdue=!!l.sentAt&&remaining>0&&g.currentMonth>dueMonth;
+  return {interest,total,monthly,paid,paidConf,remaining,interestPaid,interestConf,principalPaid,outstanding,dueMonth,overdue};
+}
+const lentOut=g=>r2(sum(g.loans,l=>lcalc(g,l).outstanding));
+const interestEarned=g=>r2(sum(g.loans,l=>lcalc(g,l).interestConf));
+const openLoan=(g,id)=>g.loans.find(l=>l.memberId===id&&['requested','approved','active'].includes(l.status));
+function loanSteps(g,amount,months,you){
+  const rate=g.loanRate,per=r2(amount*rate/100),interest=r2(per*months),total=r2(amount+interest),monthly=r2(total/months);
+  const w=you?'You':'They';
+  return `<ol class="steps">
+    <li>${w} borrow <strong>${fmtK(amount)}</strong>.</li>
+    <li>Interest is ${rate}% of ${fmtK(amount)} for each month: <strong>${fmtK(per)} a month</strong>.</li>
+    <li>For ${plural(months,'month','months')}, that is ${fmtK(per)} × ${months} = <strong>${fmtK(interest)} interest</strong>.</li>
+    <li>${w} pay back ${fmtK(amount)} + ${fmtK(interest)} = <strong>${fmtK(total)}</strong>.</li>
+    <li>That is <strong>${fmtK(monthly)} a month</strong> for ${plural(months,'month','months')}.</li></ol>`;
+}
+
+function holdings(g){
+  const h={bank:0,momo:0,cash:0};
+  active(g).forEach(c=>{h[M(c.method).loc]+=c.amount});
+  g.income.forEach(i=>{h[i.loc]+=i.amount});
+  g.transfers.forEach(t=>{h[t.from]-=t.amount;h[t.to]+=t.amount});
+  g.outgoing.filter(o=>o.status==='approved'&&o.sources).forEach(o=>{for(const k in o.sources)h[k]-=o.sources[k]});
+  g.loans.forEach(l=>{if(l.sentSources)for(const k in l.sentSources)h[k]-=l.sentSources[k];l.repayments.forEach(r=>{h[M(r.method).loc]+=r.amount})});
+  for(const k in h)h[k]=r2(h[k]);
+  return h;
+}
+const voted=(o,id)=>o.approvals.some(a=>a.id===id)||o.rejections.some(r=>r.id===id);
+function canVote(g,o,id){return o.status==='pending'&&isAdminId(g,id)&&o.requestedBy!==id&&!voted(o,id)}
+function attentionCount(g){
+  const a=active(g);
+  return a.filter(c=>c.status==='waiting'||c.status==='disputed').length+g.outgoing.filter(o=>o.status==='pending').length+g.loans.filter(l=>lcalc(g,l).overdue).length;
+}
+const srcName=(g,k)=>{const t=nm(g,treasurerId(g));return k==='bank'?'the group bank account':k==='momo'?t+"'s mobile money":'cash kept by '+t};
+const locName=(g,k)=>{const t=nm(g,treasurerId(g));return k==='bank'?'Group bank account':k==='momo'?t+"'s mobile money":'Cash kept by '+t};
+
+/* ---------- Actions on data ---------- */
+function addContrib(g,o){
+  const c=Object.assign({id:nid('p'),status:'waiting',note:''},o);
+  if(c.ref===undefined)c.ref=makeRef(c.method,c.time);
+  g.contributions.push(c);
+  hist(g,c.recordedBy,`Recorded ${fmtK(c.amount)} from ${nm(g,c.memberId)} for ${mLabel(g,c.month)}. Paid by ${M(c.method).label}${c.ref?', reference '+c.ref:''}.`,c.time,c.memberId);
+  return c;
+}
+function confirmC(g,c,time){
+  c.status='confirmed';c.confirmedAt=time||new Date();
+  hist(g,c.memberId,`Confirmed that the ${fmtK(c.amount)} payment for Month ${c.month} is correct.`,c.confirmedAt,c.memberId);
+}
+function disputeC(g,c,reason,time){
+  c.status='disputed';c.disputeNote=reason;c.disputedAt=time||new Date();
+  hist(g,c.memberId,`Said the ${fmtK(c.amount)} payment recorded for Month ${c.month} is wrong: "${reason}"`,c.disputedAt,c.memberId);
+}
+function addCorrection(g,orig,o){
+  const time=new Date();
+  const c={id:nid('p'),memberId:orig.memberId,month:orig.month,amount:o.amount,method:o.method,ref:o.ref,time,recordedBy:treasurerId(g),status:'waiting',correctionOf:orig.id,note:o.reason};
+  g.contributions.push(c);orig.supersededBy=c.id;orig.supersededAt=time;
+  hist(g,c.recordedBy,`Added a correction to ${nm(g,orig.memberId)}'s Month ${orig.month} payment: ${fmtK(orig.amount)} changed to ${fmtK(c.amount)}. Reason: "${o.reason}". The original entry is kept.`,time,orig.memberId);
+  return c;
+}
+function outTitle(g,o){
+  if(o.kind==='payout')return `Pay ${fmtK(o.amount)} to ${nm(g,o.to)} (Month ${o.month} receiver)`;
+  if(o.kind==='typechange')return `Change the group type to ${TYPE[o.newType]}`;
+  if(o.kind==='loan')return `Loan of ${fmtK(o.amount)} to ${nm(g,o.to)} for ${plural(o.months,'month','months')}`;
+  return `Spend ${fmtK(o.amount)}: ${o.reason}`;
+}
+function addOut(g,o){
+  const x=Object.assign({id:nid('o'),status:'pending',approvals:[],rejections:[],createdAt:o.time||new Date(),subject:null},o);
+  delete x.time;
+  x.title=outTitle(g,x);
+  g.outgoing.push(x);
+  hist(g,x.requestedBy,`Asked for approval: ${x.title}.${x.kind==='loan'?' Reason: "'+x.reason+'"':''}`,x.createdAt,x.subject);
+  return x;
+}
+function evaluate(g,o,time){
+  if(o.status!=='pending')return;
+  const chairId=byRole(g,'chair').id;
+  const leads=g.members.filter(m=>m.role==='chair'||m.role==='vice').map(m=>m.id);
+  const voters=committee(g).filter(m=>m.id!==o.requestedBy).length;
+  const loan=o.kind==='loan'?g.loans.find(l=>l.id===o.loanId):null;
+  if(o.rejections.some(r=>r.id===chairId)||o.rejections.length>voters/2){
+    o.status='rejected';o.decidedAt=time;if(loan)loan.status='rejected';
+    hist(g,null,`Rejected: ${o.title}.${o.kind==='typechange'?'':' No money was moved.'}`,time,o.subject);return;
+  }
+  const yes=o.approvals.map(a=>a.id);
+  if(yes.length>=2&&yes.some(id=>leads.includes(id))){
+    o.status='approved';o.decidedAt=time;
+    let msg=`Approved: ${o.title}. The money is now counted as paid out.`;
+    if(o.kind==='typechange')msg=`Approved: ${o.title}. It will start with the next cycle.`;
+    if(loan){loan.status='approved';msg=`Approved: ${o.title}. The treasurer can now send the money.`}
+    hist(g,null,msg,time,o.subject);
+  }
+}
+function vote(g,o,id,kind,time,reason){
+  time=time||new Date();
+  if(kind==='yes'){o.approvals.push({id,time});hist(g,id,`Voted yes on: ${o.title}.`,time,o.subject)}
+  else{o.rejections.push({id,time,reason:reason||''});hist(g,id,`Voted no on: ${o.title}.${reason?' Reason: "'+reason+'"':''}`,time,o.subject)}
+  evaluate(g,o,time);
+}
+const RULE_TEXT='Needs a yes from 2 committee members, including the chairperson or vice chairperson. The person asking cannot vote.';
+
+/* Loans */
+function requestLoan(g,who,amount,months,purpose,time){
+  const l={id:nid('l'),memberId:who,amount,months,purpose,status:'requested',repayments:[],requestedAt:time};
+  g.loans.push(l);
+  const o=addOut(g,{kind:'loan',loanId:l.id,amount,months,to:who,reason:purpose,requestedBy:who,subject:who,time});
+  l.approvalId=o.id;
+  return {l,o};
+}
+function sendLoan(g,l,src,ref,time,month){
+  l.sentAt=time;l.sentSources={[src]:l.amount};l.sentRef=ref;l.startMonth=month;l.status='active';
+  hist(g,treasurerId(g),`Sent the ${fmtK(l.amount)} loan to ${nm(g,l.memberId)} from ${srcName(g,src)}. Reference: ${ref}.`,time,l.memberId);
+}
+function confirmLoanReceived(g,l,time){
+  l.receivedAt=time||new Date();
+  hist(g,l.memberId,`Confirmed receiving the ${fmtK(l.amount)} loan.`,l.receivedAt,l.memberId);
+}
+function addRepay(g,l,o){
+  const r={id:nid('r'),amount:o.amount,method:o.method,ref:o.ref===undefined?makeRef(o.method,o.time):o.ref,time:o.time,month:o.month,status:'waiting',recordedBy:treasurerId(g)};
+  l.repayments.push(r);
+  hist(g,r.recordedBy,`Recorded a loan repayment of ${fmtK(r.amount)} from ${nm(g,l.memberId)}. Paid by ${M(r.method).label}${r.ref?', reference '+r.ref:''}.`,r.time,l.memberId);
+  if(lcalc(g,l).remaining<=0&&l.status!=='repaid'){l.status='repaid';hist(g,null,`${nm(g,l.memberId)}'s loan of ${fmtK(l.amount)} is fully repaid.`,r.time,l.memberId)}
+  return r;
+}
+function confirmRepay(g,l,r,time){r.status='confirmed';r.confirmedAt=time||new Date();hist(g,l.memberId,`Confirmed the ${fmtK(r.amount)} loan repayment is correct.`,r.confirmedAt,l.memberId)}
+function disputeRepay(g,l,r,reason){r.status='disputed';r.disputeNote=reason;hist(g,l.memberId,`Said the ${fmtK(r.amount)} loan repayment is wrong: "${reason}"`,new Date(),l.memberId)}
+
+/* ---------- Demo data ---------- */
+function blankGroup(o){return Object.assign({contributions:[],outgoing:[],transfers:[],income:[],history:[],rotation:[],loans:[],loanRate:10,loanMultiple:3,loanMaxMonths:3},o)}
+const mkMembers=list=>list.map(([id,name,role,phone])=>({id,name,role,phone}));
+function seedChilimba(){
+  const g=blankGroup({id:'g1',name:"Kalingalinga Women's Chilimba",type:'chilimba',amount:500,cycle:8,currentMonth:4,startY:2026,startM:6,memberView:'c3'});
+  g.members=mkMembers([['c1','Mwila Banda','chair','097 214 5521'],['c2','Chanda Phiri','treasurer','096 880 1290'],['c3','Bwalya Mulenga','member','077 301 4478'],['c4','Mutale Zulu','vice','095 642 0913'],['c5','Thandiwe Lungu','member','097 559 2306'],['c6','Natasha Tembo','comms','096 118 7724'],['c7','Precious Chileshe','rep','076 903 5512'],['c8','Memory Sakala','member','095 270 3369']]);
+  g.rotation=['c4','c6','c8','c3','c7','c5','c1','c2'];
+  const how={c1:'mtn',c2:'cash',c3:'airtel',c4:'airtel',c5:'airtel',c6:'bank',c7:'mtn',c8:'zamtel'};
+  const T='c2';
+  hist(g,'c1','Created the group as a Chilimba: 8 members, K500 each per month, 8-month cycle.',new Date(2026,5,27,16,5));
+  hist(g,'c1','Set up the committee: chairperson, vice chairperson, treasurer, communications and a member representative.',new Date(2026,5,27,16,9));
+  hist(g,'c1','Set the order for receiving the pot. The treasurer, Chanda Phiri, receives last.',new Date(2026,5,27,16,12));
+  for(let m=1;m<=3;m++){
+    g.members.forEach((mb,i)=>{
+      const t=at(g,m,1+(i%4),7+i,(i*13+m*7)%60);
+      const c=addContrib(g,{memberId:mb.id,amount:500,month:m,method:how[mb.id],time:t,recordedBy:T});
+      confirmC(g,c,new Date(t.getTime()+(1+i%3)*3600e3+17*60e3));
+    });
+    const t=at(g,m,6,15,30);
+    const o=addOut(g,{kind:'payout',month:m,to:g.rotation[m-1],amount:4000,sources:{momo:3000,cash:500,bank:500},reason:'',requestedBy:T,time:t});
+    vote(g,o,'c1','yes',new Date(t.getTime()+40*60e3));
+    vote(g,o,m===1?'c6':m===2?'c4':'c7','yes',new Date(t.getTime()+95*60e3));
+  }
+  const plan=[['c1','confirmed',1,8,5],['c2','confirmed',1,8,40],['c4','confirmed',2,12,15],['c6','confirmed',2,14,2],['c5','disputed',2,18,22],['c3','waiting',3,9,12],['c7','waiting',3,10,40]];
+  plan.forEach(([id,st,day,h,mi])=>{
+    const t=at(g,4,day,h,mi);
+    const c=addContrib(g,{memberId:id,amount:id==='c5'?300:500,month:4,method:how[id],time:t,recordedBy:T});
+    if(st==='confirmed')confirmC(g,c,new Date(t.getTime()+2*3600e3));
+    if(st==='disputed')disputeC(g,c,'I sent K500 on Airtel Money, not K300. My Airtel message shows K500.',new Date(t.getTime()+3*3600e3));
+  });
+  const w=addOut(g,{kind:'withdrawal',amount:60,sources:{cash:60},reason:'Buy a receipt book and airtime for payment reminders',requestedBy:T,time:at(g,4,2,17,30)});
+  vote(g,w,'c4','yes',at(g,4,2,19,5));
+  return g;
+}
+function seedVillage(){
+  const g=blankGroup({id:'g2',name:'Matero Village Savings',type:'village',amount:100,cycle:12,currentMonth:6,startY:2026,startM:4,memberView:'v3'});
+  g.members=mkMembers([['v1','Kelvin Chanda','chair','097 410 2287'],['v2','Agnes Mwale','treasurer','096 225 8013'],['v3','Joseph Tembo','member','077 618 3390'],['v4','Esther Banda','vice','095 334 7125'],['v5','Moses Phiri','member','097 902 4461'],['v6','Ruth Zulu','comms','096 571 0038'],['v7','Peter Lungu','member','076 248 9914'],['v8','Mercy Mulenga','rep','095 863 2207'],['v9','Davies Bwalya','member','097 137 5582'],['v10','Brenda Musonda','member','096 690 4475']]);
+  const how={v1:'bank',v2:'cash',v3:'mtn',v4:'airtel',v5:'mtn',v6:'zamtel',v7:'cash',v8:'bank',v9:'airtel',v10:'mtn'};
+  const base=[400,300,250,500,200,350,150,600,300,200],vary=[0,50,-50,100,0,50];
+  const T='v2';
+  hist(g,'v1','Created the group as Village Banking: 10 members, at least K100 saved each month, 12-month cycle. Loans: 10% interest a month, up to 3 times your savings, repaid within 3 months.',new Date(2026,3,28,14,0));
+  hist(g,'v1','Set up the committee: chairperson, vice chairperson, treasurer, communications and a member representative.',new Date(2026,3,28,14,6));
+  g.income.push({id:nid('i'),label:'Registration fees (K50 from each member)',amount:500,loc:'bank',month:1,time:at(g,1,2,10,0)});
+  hist(g,T,'Recorded K500 group income: registration fees (K50 from each member), paid into the group bank account.',at(g,1,2,10,0));
+  for(let m=1;m<=6;m++){
+    g.members.forEach((mb,i)=>{
+      if(m===6&&mb.id==='v7')return;
+      const amt=Math.max(100,base[i]+vary[(i+m)%6]);
+      const t=at(g,m,m===6?1+(i%3):1+(i%5),7+i,(i*11+m*5)%60);
+      const c=addContrib(g,{memberId:mb.id,amount:amt,month:m,method:how[mb.id],time:t,recordedBy:T});
+      if(!(m===6&&(mb.id==='v3'||mb.id==='v9')))confirmC(g,c,new Date(t.getTime()+(2+i%4)*3600e3));
+    });
+    if(m===3){g.income.push({id:nid('i'),label:'Late payment fines',amount:200,loc:'cash',month:3,time:at(g,3,6,11,0)});hist(g,T,'Recorded K200 group income: late payment fines, kept as cash.',at(g,3,6,11,0))}
+    if(m===5){g.income.push({id:nid('i'),label:'Late payment fines',amount:150,loc:'cash',month:5,time:at(g,5,6,11,30)});hist(g,T,'Recorded K150 group income: late payment fines, kept as cash.',at(g,5,6,11,30))}
+    if(m<=5){
+      const mc=g.contributions.filter(c=>c.month===m);
+      const momo=sum(mc.filter(c=>M(c.method).loc==='momo'),c=>c.amount);
+      const cash=sum(mc.filter(c=>M(c.method).loc==='cash'),c=>c.amount)+sum(g.income.filter(i=>i.month===m&&i.loc==='cash'),i=>i.amount);
+      const t=at(g,m,8,10,15);
+      g.transfers.push({id:nid('t'),from:'momo',to:'bank',amount:momo,time:t,by:T,ref:'Slip '+dg(6)});
+      hist(g,T,`Moved ${fmtK(momo)} from mobile money to the group bank account.`,t);
+      const t2=at(g,m,8,10,40);
+      g.transfers.push({id:nid('t'),from:'cash',to:'bank',amount:cash,time:t2,by:T,ref:'Slip '+dg(6)});
+      hist(g,T,`Deposited ${fmtK(cash)} cash into the group bank account.`,t2);
+    }
+    if(m===2){
+      const o=addOut(g,{kind:'withdrawal',amount:120,sources:{bank:120},reason:'Print member savings cards',requestedBy:T,time:at(g,2,15,9,0)});
+      vote(g,o,'v1','yes',at(g,2,15,12,10));vote(g,o,'v8','yes',at(g,2,15,13,45));
+    }
+    if(m===4){
+      const o=addOut(g,{kind:'withdrawal',amount:1000,sources:{bank:1000},reason:'Lend money to a friend who is not a member',requestedBy:T,time:at(g,4,18,16,0)});
+      vote(g,o,'v4','no',at(g,4,18,18,20),'We only lend to members.');
+      vote(g,o,'v1','no',at(g,4,18,19,0),'Our rules do not allow lending to non-members.');
+    }
+  }
+  const loans=[
+    {who:'v4',amount:2000,months:2,purpose:'Buy stock for my salon',m:2,day:10,votes:['v1','v6'],pays:[[3,5,1200,'airtel'],[4,5,1200,'airtel']]},
+    {who:'v7',amount:800,months:1,purpose:'Pay school fees for my son',m:3,day:12,votes:['v1','v8'],pays:[[4,6,400,'cash']]},
+    {who:'v5',amount:1000,months:2,purpose:'Buy seed and fertiliser',m:4,day:9,votes:['v4','v8'],pays:[[5,5,600,'mtn']]},
+    {who:'v3',amount:1500,months:3,purpose:'Buy a second-hand sewing machine',m:5,day:10,votes:['v1','v6'],pays:[[6,2,650,'mtn']]}
+  ];
+  loans.forEach(s=>{
+    const t=at(g,s.m,s.day,9,30);
+    const {l,o}=requestLoan(g,s.who,s.amount,s.months,s.purpose,t);
+    s.votes.forEach((v,i)=>vote(g,o,v,'yes',new Date(t.getTime()+(i+1)*3*3600e3)));
+    const ts=at(g,s.m,s.day+2,11,0);
+    sendLoan(g,l,'bank','Slip '+dg(6),ts,s.m);
+    confirmLoanReceived(g,l,new Date(ts.getTime()+2*3600e3));
+    s.pays.forEach(([m,day,amt,method])=>{
+      const tr=at(g,m,day,10,20);
+      const r=addRepay(g,l,{amount:amt,method,time:tr,month:m});
+      confirmRepay(g,l,r,new Date(tr.getTime()+3*3600e3));
+      if(m<6){const loc=M(method).loc;const tt=at(g,m,9,9,0);g.transfers.push({id:nid('t'),from:loc,to:'bank',amount:amt,time:tt,by:T,ref:'Slip '+dg(6)});hist(g,T,`Moved ${fmtK(amt)} of loan repayments to the group bank account.`,tt)}
+    });
+  });
+  const pend=requestLoan(g,'v9',1200,2,'Restock my shop',at(g,6,2,9,30));
+  vote(g,pend.o,'v6','yes',at(g,6,2,13,15));
+  addOut(g,{kind:'withdrawal',amount:45,sources:{bank:45},reason:'Monthly bank account charge',requestedBy:T,time:at(g,6,2,16,20)});
+  return g;
+}
+S.groups=[seedChilimba(),seedVillage()];
+
+/* ---------- Icons ---------- */
+const IC={
+  home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+  receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  people:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.6c2 .7 3.2 2.5 3.5 5.4"/>',
+  cycle:'<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
+  pie:'<circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/>',
+  shield:'<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  back:'<path d="M15 5l-7 7 7 7"/>',
+  lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  hand:'<path d="M3 14h3l3-2h5a1.5 1.5 0 0 1 0 3h-3"/><path d="M14 15l4.5-2.2a1.6 1.6 0 0 1 1.8 2.6L15 19H6l-3-1"/><circle cx="15" cy="6" r="3"/>',
+  eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
+};
+const icon=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
+
+/* ---------- Small UI parts ---------- */
+const PILL={confirmed:['ok','Confirmed','✓'],waiting:['wait','Waiting for confirmation','…'],disputed:['bad','Disputed','!'],notpaid:['none','Not paid yet','–'],pending:['wait','Pending approval','…'],approved:['ok','Approved','✓'],rejected:['bad','Rejected','✕'],corrected:['none','Replaced by a correction','↺'],overdue:['bad','Overdue','!'],repaying:['wait','Being repaid','…'],repaid:['ok','Fully repaid','✓'],tosend:['wait','Approved, waiting to be sent','…']};
+function pill(st,text){const p=PILL[st];return `<span class="pill ${p[0]}"><span aria-hidden="true">${p[2]}</span>${esc(text||p[1])}</span>`}
+const privacyNote=txt=>`<p class="lock-note">${icon('eye')}<span>${txt}</span></p>`;
+
+function topbar(g){
+  let opts,who='';
+  if(g){
+    opts=ROLE_ORDER.filter(r=>r==='member'||byRole(g,r)).map(r=>{const id=r==='member'?(g.memberView||byRole(g,'member').id):byRole(g,r).id;return `<option value="${r}"${S.role===r?' selected':''}>${ROLE[r]} (${esc(nm(g,id))})</option>`}).join('');
+    const v=viewer(g);
+    who=`<p class="who">You are seeing what <strong>${esc(v.name)}</strong> sees, as ${v.role==='member'?'an ordinary member':'the '+ROLE[v.role].toLowerCase()}${v.role!=='member'?' (committee)':''}.</p>`;
+  } else opts=ROLE_ORDER.map(r=>`<option value="${r}"${S.role===r?' selected':''}>${ROLE[r]}</option>`).join('');
+  return `<header class="topbar"><div class="topbar-inner">
+    <div class="brand-row"><button class="brand" data-action="home">Usambazi</button><span class="proto">Prototype with pretend data</span></div>
+    <div class="viewas"><label for="viewas">View as</label><select id="viewas">${opts}</select></div>
+    ${who}</div></header>`;
+}
+function nav(g){
+  const vid=viewerId(g);
+  const myWaiting=active(g).filter(c=>c.memberId===vid&&c.status==='waiting').length;
+  const votes=g.outgoing.filter(o=>canVote(g,o,vid)&&(o.kind!=='loan'||!privateView(g))).length;
+  const loanBadge=g.loans.filter(l=>(l.memberId===vid&&((l.sentAt&&!l.receivedAt)||l.repayments.some(r=>r.status==='waiting')))||(isT(g)&&l.status==='approved')).length;
+  const items=g.type==='chilimba'
+    ?[['overview','Overview','home'],['payments','Payments','receipt',myWaiting],['members','Members','people'],['cycle','Turns','cycle'],['approvals','Approvals','shield',votes],['history','History','clock']]
+    :[['overview','Overview','home'],['payments','Payments','receipt',myWaiting],['loans','Loans','hand',loanBadge],['cycle','Share-out','pie'],['approvals','Approvals','shield',votes],['members','Members','people',0,true],['history','History','clock']];
+  const map={record:'payments',request:'approvals',move:'overview',loanreq:'loans'};
+  const on=map[S.screen]||S.screen;
+  return `<nav class="nav" aria-label="Group menu">${items.map(([s,l,ic,b,desk])=>`<button${desk?' class="desk"':''} data-action="go" data-screen="${s}"${on===s?' aria-current="page"':''}>${icon(ic)}<span>${l}</span>${b?`<span class="badge" aria-label="${b} waiting for you">${b}</span>`:''}</button>`).join('')}</nav>`;
+}
+function groupHead(g){
+  return `<button class="back" data-action="home">${icon('back')}All groups</button>
+  <div class="group-head"><h1>${esc(g.name)}</h1>
+  <p class="group-sub"><span class="type-badge">${icon('lock')}${TYPE[g.type]}</span><span>${g.members.length} members</span><span>Month ${g.currentMonth} of ${g.cycle}, ${monthLabel(g,g.currentMonth)}</span></p></div>`;
+}
+function backTo(screen,label){return `<button class="back" data-action="go" data-screen="${screen}">${icon('back')}${label}</button>`}
+
+/* ---------- Screens ---------- */
+function home(){
+  const rows=S.groups.map(g=>{
+    const att=attentionCount(g);
+    return `<button class="grow" data-action="open" data-id="${g.id}">
+      <span><span class="grow-name">${esc(g.name)}</span><span class="grow-meta">${TYPE[g.type]}, ${g.members.length} members, month ${g.currentMonth} of ${g.cycle}</span>${att?pill('waiting',plural(att,'thing','things')+' to check'):pill('confirmed','All up to date')}</span>
+      <span class="grow-amt num"><small>Confirmed savings</small>${fmtK(savedConfirmed(g))}</span></button>`;
+  }).join('');
+  return `<h1 class="page-title">My groups</h1>
+  <p class="lede">Every payment is recorded, confirmed by the person who paid, and checked by a committee. Nobody can secretly change the records.</p>
+  <div class="list">${rows||'<p class="empty">You are not in any group yet.</p>'}</div>
+  <div class="form-actions"><button class="btn" data-action="new-group">Create a group</button></div>
+  <p class="hint" style="margin-top:18px">Tip: use "View as" at the top to see the app as different committee members or as an ordinary member.</p>`;
+}
+
+function moneyCard(g){
+  const h=holdings(g),lent=lentOut(g),held=r2(h.bank+h.momo+h.cash),total=r2(held+lent),tName=nm(g,treasurerId(g));
+  const tHeld=r2(h.momo+h.cash),share=total>0?tHeld/total:0;
+  const keys=[['bank','sw-bank',h.bank,locName(g,'bank')],['momo','sw-momo',h.momo,locName(g,'momo')],['cash','sw-cash',h.cash,locName(g,'cash')]];
+  if(g.type==='village')keys.push(['lent','sw-lent',lent,'Lent out to members (being repaid)']);
+  const bar=total>0?keys.map(([k,c,v])=>v>0?`<span class="${c}" style="width:${v/total*100}%"></span>`:'').join(''):'';
+  const legend=keys.map(([k,c,v,label])=>`<li><span class="sw ${c}"></span><span>${esc(label)}</span><span class="amt">${fmtK(v)}<span class="pct">${total>0?Math.round(v/total*100):0}%</span></span></li>`).join('');
+  let warn='';
+  if(share>0.5&&tHeld>1000){
+    warn=`<div class="warn"><p><strong>${esc(tName)} is holding ${fmtK(tHeld)}, which is ${Math.round(share*100)}% of the group's money.</strong></p><p>It is safer to keep most of it in the group bank account, where taking money out needs more than one signature.</p>${isT(g)?'<button class="btn small" data-action="go" data-screen="move">Move money to the bank</button>':''}</div>`;
+  } else if(isT(g)&&tHeld>0){
+    warn=`<div style="margin-top:12px"><button class="btn small ghost" data-action="go" data-screen="move">Move money to the bank</button></div>`;
+  }
+  return `<section class="money" aria-labelledby="money-h"><h2 id="money-h">Where is the money?</h2>
+    <p class="money-total">${fmtK(total)}</p><p class="money-sub">${total>0?'belongs to the group right now':'No money is held yet.'}</p>
+    ${total>0?`<div class="mbar" aria-hidden="true">${bar}</div><ul class="legend">${legend}</ul>`:''}${warn}</section>`;
+}
+
+function overview(g){
+  const vid=viewerId(g),a=active(g),cm=g.currentMonth,priv=privateView(g),adm=isAdm(g);
+  const myW=a.filter(c=>c.memberId===vid&&c.status==='waiting').length;
+  const disp=a.filter(c=>c.status==='disputed').length;
+  const waitAll=a.filter(c=>c.status==='waiting').length-myW;
+  const pend=g.outgoing.filter(o=>o.status==='pending'&&(!priv||o.kind!=='loan'||o.subject===vid));
+  const myVotes=pend.filter(o=>canVote(g,o,vid)).length;
+  const notPaid=g.members.filter(mb=>monthStatus(g,mb.id,cm).status==='notpaid');
+  const myLoanTodo=g.loans.filter(l=>l.memberId===vid&&((l.sentAt&&!l.receivedAt)||l.repayments.some(r=>r.status==='waiting'))).length;
+  const toSend=isT(g)?g.loans.filter(l=>l.status==='approved').length:0;
+  const overdue=g.loans.filter(l=>lcalc(g,l).overdue&&(adm||l.memberId===vid));
+  const items=[];
+  if(myW)items.push(['bad',`You have ${plural(myW,'payment','payments')} to confirm`,'Check it against your mobile money message.','payments','mine']);
+  if(myLoanTodo)items.push(['bad','Your loan needs you to confirm something','Check the money you received or repaid.','loans']);
+  if(myVotes)items.push(['bad',`${plural(myVotes,'request needs','requests need')} your vote`,'Money cannot leave the group until the committee approves it.','approvals']);
+  if(toSend)items.push(['bad',`${plural(toSend,'approved loan is','approved loans are')} waiting for you to send`,'','loans']);
+  if(overdue.length)items.push(['bad',`${plural(overdue.length,'loan is','loans are')} overdue`,adm?overdue.map(l=>nm(g,l.memberId)).join(', '):'Please repay as soon as you can.','loans']);
+  if(!priv){
+    if(disp)items.push(['bad',`${plural(disp,'payment is','payments are')} disputed`,'Everyone can see these until the treasurer adds a correction.','payments','all']);
+    if(waitAll>0)items.push(['wait',`${plural(waitAll,'payment is','payments are')} waiting for members to confirm`,'','payments','all']);
+    if(pend.length&&!myVotes)items.push(['wait',`${plural(pend.length,'request is','requests are')} waiting for committee approval`,'','approvals']);
+  }
+  if(notPaid.length)items.push(['wait',`${plural(notPaid.length,'member has','members have')} not paid for Month ${cm} yet`,notPaid.map(m=>m.name).join(', '),'members']);
+  const att=items.length?items.map(([c,t,s,scr,tab])=>`<button class="att" data-action="go" data-screen="${scr}"${tab?` data-tab="${tab}"`:''}><span class="dot ${c}"></span><span><strong>${esc(t)}</strong>${s?`<span class="meta">${esc(s)}</span>`:''}</span></button>`).join(''):`<div class="att" style="cursor:default"><span class="dot ok"></span><span><strong>Nothing needs attention right now</strong></span></div>`;
+
+  let month='';
+  const conf=sum(g.members,mb=>monthStatus(g,mb.id,cm).confirmed);
+  const rows=g.members.map(mb=>{const s=monthStatus(g,mb.id,cm);const showAmt=!priv||mb.id===vid;return `<div class="row"><span>${esc(mb.name)}${mb.id===vid?' <span class="muted">(you)</span>':''}${showAmt?`<span class="meta" style="display:block">${s.amount?fmtK(s.amount)+' recorded':'Nothing recorded'}</span>`:''}</span>${pill(s.status)}</div>`}).join('');
+  if(g.type==='chilimba'){
+    const pot=g.amount*g.members.length,rec=g.rotation[cm-1];
+    month=`<div class="month-head"><span class="big">${fmtK(conf)} <span class="muted" style="font-size:17px;font-weight:600">of ${fmtK(pot)} confirmed</span></span></div>
+    <div class="progress" role="img" aria-label="${Math.round(conf/pot*100)}% of the pot confirmed"><span style="width:${Math.min(100,conf/pot*100)}%"></span></div>
+    <p class="meta" style="margin-top:8px">This month's pot goes to <strong style="color:var(--ink)">${esc(nm(g,rec))}</strong>.</p>`;
+  }else{
+    const paid=g.members.filter(mb=>monthStatus(g,mb.id,cm).status!=='notpaid').length;
+    month=`<div class="month-head"><span class="big">${fmtK(conf)} <span class="muted" style="font-size:17px;font-weight:600">saved and confirmed this month</span></span></div>
+    <p class="meta" style="margin-top:6px">${paid} of ${g.members.length} members have paid. The minimum saving is ${fmtK(g.amount)}.</p>`;
+  }
+  const typePending=g.outgoing.some(o=>o.kind==='typechange'&&o.status==='pending');
+  let totals='';
+  if(g.type==='chilimba'){const po=g.outgoing.filter(o=>o.kind==='payout'&&o.status==='approved');totals=`${fmtK(sum(po,o=>o.amount))} paid out so far to ${plural(po.length,'member','members')}.`}
+  else totals=`${fmtK(savedConfirmed(g))} confirmed savings and ${fmtK(interestEarned(g))} loan interest received so far this cycle.`;
+  const comm=committee(g).map(m=>`<div class="row"><span><strong>${esc(m.name)}</strong>${m.id===vid?' <span class="muted">(you)</span>':''}</span><span class="meta">${ROLE[m.role]}</span></div>`).join('');
+
+  return groupHead(g)+moneyCard(g)+`
+  <section class="section"><h2>Needs attention</h2><div class="list">${att}</div></section>
+  <section class="section"><h2>This month: ${esc(mLabel(g,cm))}</h2><p class="sub">${esc(totals)}</p>
+    <div class="formcard" style="padding:16px">${month}</div><div class="list">${rows}</div>
+    ${priv?privacyNote("You can see who has paid, but only the committee can see other members' amounts."):''}
+    ${g.type==='village'?'<div class="form-actions"><button class="btn small ghost" data-action="go" data-screen="members">See all members</button></div>':''}</section>
+  <section class="section"><h2>Committee</h2><p class="sub">The committee checks the records and approves any money leaving the group.</p><div class="list">${comm}</div></section>
+  <section class="section"><h2>Group type</h2>
+    <div class="typelock">${icon('lock')}<div><strong>${TYPE[g.type]}, locked</strong><p class="meta">Changing the type changes how everyone's money is worked out, so it needs committee approval.</p>
+    ${typePending?'<p class="meta" style="margin-top:6px"><strong>A request to change the type is waiting for approval.</strong></p>':'<button class="linkbtn" data-action="ask-type">Ask to change the type</button>'}</div></div></section>`;
+}
+
+function entry(g,c,vid){
+  const sup=c.supersededBy?g.contributions.find(x=>x.id===c.supersededBy):null;
+  const orig=c.correctionOf?g.contributions.find(x=>x.id===c.correctionOf):null;
+  const st=sup?'corrected':c.status;
+  let notes='';
+  if(c.status==='disputed'&&c.disputeNote)notes+=`<p class="note bad"><strong>${esc(first(g,c.memberId))} says:</strong> "${esc(c.disputeNote)}"</p>`;
+  if(orig)notes+=`<p class="note info">This corrects the ${fmtK(orig.amount)} entry from ${fmtD(orig.time)}. Reason: "${esc(c.note)}"</p>`;
+  if(sup)notes+=`<p class="note plain">Replaced by a correction on ${fmtD(c.supersededAt)}. It stays here so everyone can see what changed.</p>`;
+  if(c.note&&!orig)notes+=`<p class="note plain">Note: ${esc(c.note)}</p>`;
+  let acts='';
+  if(!sup&&c.memberId===vid&&c.status==='waiting')acts+=`<button class="btn small" data-action="confirm" data-id="${c.id}">Yes, I paid this</button><button class="btn small danger-ghost" data-action="dispute" data-id="${c.id}">This is wrong</button>`;
+  if(!sup&&isT(g))acts+=`<button class="btn small ghost" data-action="correct" data-id="${c.id}">Fix with a correction</button>`;
+  return `<article class="entry${sup?' superseded':''}">
+    <div class="entry-top"><div><strong>${esc(nm(g,c.memberId))}</strong>${c.memberId===vid?' <span class="muted">(you)</span>':''}<div class="meta">${esc(mLabel(g,c.month))}</div></div><div class="amt">${fmtK(c.amount)}</div></div>
+    <p class="meta">${esc(M(c.method).label)}${c.ref?', ref '+esc(c.ref):''}. Recorded by ${esc(nm(g,c.recordedBy))} on ${fmtDT(c.time)}.</p>
+    <div class="entry-status">${pill(st)}</div>${notes}${acts?`<div class="actions">${acts}</div>`:''}</article>`;
+}
+
+function payments(g){
+  const vid=viewerId(g),priv=privateView(g);
+  if(priv)S.payTab='mine';
+  const sorted=[...g.contributions].sort((a,b)=>b.time-a.time);
+  let list,top='';
+  if(S.payTab==='mine'){
+    list=sorted.filter(c=>c.memberId===vid);
+    const w=list.filter(c=>c.status==='waiting'&&!c.supersededBy).length;
+    if(w)top=`<div class="infobox">Before you confirm, check each payment against the message from your mobile money provider or your cash receipt.</div>`;
+  }else{
+    list=S.payMonth==='all'?sorted:sorted.filter(c=>c.month===+S.payMonth);
+    const opts=['<option value="all">All months</option>'].concat(Array.from({length:g.currentMonth},(_,i)=>`<option value="${i+1}"${String(i+1)===String(S.payMonth)?' selected':''}>${esc(mLabel(g,i+1))}</option>`));
+    top=`<div class="filter"><label for="pay-month">Show</label><select id="pay-month">${opts.join('')}</select></div>`;
+    if(!isT(g))top+=`<p class="hint">Only the treasurer can record payments. You can confirm or dispute your own.</p>`;
+  }
+  const tabs=priv?privacyNote('In village banking, you see only your own payments. The committee sees everyone\'s, and the group totals are on the Overview.'):`<div class="tabs" role="tablist"><button role="tab" data-action="tab" data-tab="mine" aria-selected="${S.payTab==='mine'}">My payments</button><button role="tab" data-action="tab" data-tab="all" aria-selected="${S.payTab==='all'}">All payments</button></div>`;
+  return groupHead(g)+`<div class="screen-head"><h2>Payments</h2>${isT(g)?'<button class="btn" data-action="go" data-screen="record">Record a payment</button>':''}</div>
+  ${tabs}${top}<div class="list">${list.length?list.map(c=>entry(g,c,vid)).join(''):'<p class="empty">No payments to show.</p>'}</div>`;
+}
+
+function methodChips(name,selected){
+  return `<div class="chips" role="radiogroup">${METHODS.map(m=>`<label class="chip"><input type="radio" name="${name}" value="${m.id}"${selected===m.id?' checked':''}><span>${m.label}</span></label>`).join('')}</div>`;
+}
+function refField(prefix,method){
+  const m=method?M(method):null;
+  const hide=m&&m.id==='cash';
+  return `<div class="field" id="${prefix}-refwrap"${hide?' hidden':''}><label for="${prefix}-ref" id="${prefix}-reflabel">${m&&!m.needsRef?'Deposit slip number (optional)':'Transaction reference'}</label><input type="text" id="${prefix}-ref" autocomplete="off"><p class="hint" id="${prefix}-refhint">${m?esc(m.hint):'Needed for mobile money. It lets anyone trace the payment.'}</p></div>
+  <p class="hint" id="${prefix}-cashhint"${hide?'':' hidden'}>For cash, write the member a receipt as well.</p>`;
+}
+function record(g){
+  if(!isT(g))return groupHead(g)+`<p class="infobox">Only the treasurer can record payments.</p>`;
+  const today=new Date();const iso=today.getFullYear()+'-'+p2(today.getMonth()+1)+'-'+p2(today.getDate());
+  return backTo('payments','Payments')+`<h1 class="page-title">Record a payment</h1>
+  <p class="lede">The member will be asked to confirm it. Once saved, a payment cannot be edited or deleted. Mistakes are fixed with a correction that the committee can see.</p>
+  <div id="rec-errors"></div>
+  <div class="formcard">
+    <div class="field"><label for="f-member">Who paid?</label><select id="f-member"><option value="">Choose a member</option>${g.members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="f-amount">Amount (K)</label><input type="number" id="f-amount" inputmode="decimal" min="0" step="0.01" value="${g.type==='chilimba'?g.amount:''}">${g.type==='chilimba'?`<p class="hint">Everyone in this chilimba pays ${fmtK(g.amount)} a month.</p>`:`<p class="hint">The minimum saving is ${fmtK(g.amount)}. Loan repayments are recorded on the Loans screen.</p>`}</div>
+    <div class="field"><label for="f-month">For which month?</label><select id="f-month">${Array.from({length:g.cycle},(_,i)=>`<option value="${i+1}"${i+1===g.currentMonth?' selected':''}>${esc(mLabel(g,i+1))}</option>`).join('')}</select></div>
+    <div class="field"><label for="f-date">Date paid</label><input type="date" id="f-date" value="${iso}"></div>
+    <div class="field"><span class="label">How did they pay?</span>${methodChips('f-method','')}</div>
+    ${refField('f','')}
+    <div class="field"><label for="f-note">Note (optional)</label><input type="text" id="f-note" placeholder="For example: paid at the meeting"></div>
+    <div class="form-actions"><button class="btn" data-action="save-record">Save payment</button><button class="btn ghost" data-action="go" data-screen="payments">Cancel</button></div>
+  </div>`;
+}
+
+function members(g){
+  const cm=g.currentMonth,vid=viewerId(g),priv=privateView(g),comms=isComms(g);
+  const notPaid=g.members.filter(mb=>monthStatus(g,mb.id,cm).status==='notpaid');
+  const rows=g.members.map(mb=>{
+    const s=monthStatus(g,mb.id,cm);
+    const tot=savedBy(g,mb.id);
+    const showAmt=!priv||mb.id===vid;
+    let extra='';
+    if(g.type==='chilimba'){const i=g.rotation.indexOf(mb.id);const po=g.outgoing.find(o=>o.kind==='payout'&&o.month===i+1&&o.status==='approved');extra=po?`, received the pot in Month ${i+1}`:`, receives the pot in Month ${i+1} (${monthLabel(g,i+1)})`}
+    const remind=comms&&s.status==='notpaid'?`<button class="btn small ghost" data-action="remind" data-id="${mb.id}">Send reminder</button>`:'';
+    return `<div class="row"><div><strong>${esc(mb.name)}</strong>${mb.id===vid?' <span class="muted">(you)</span>':''}${mb.role!=='member'?`<span class="role-tag">${ROLE[mb.role]}</span>`:''}<div class="meta">${esc(mb.phone)}${esc(extra)}</div></div>
+    <div class="right">${showAmt?`<span class="num" style="font-weight:700">${fmtK(tot)}</span><span class="meta">${g.type==='village'?'saved':'paid'} this cycle</span>`:''}${pill(s.status,s.status==='notpaid'?'Not paid this month':null)}${remind}</div></div>`;
+  }).join('');
+  return groupHead(g)+`<div class="screen-head"><h2>Members</h2>${comms&&notPaid.length?`<button class="btn small" data-action="remind-all">Remind all ${notPaid.length} who have not paid</button>`:''}</div>
+  <p class="sub muted" style="margin-top:4px">Up to ${MAXM[g.type]} members in a ${TYPE[g.type].toLowerCase()}. Status shows ${esc(mLabel(g,cm))}.</p>
+  ${comms?'<p class="hint">As the communications person, you can send payment reminders.</p>':''}
+  <div class="list">${rows}</div>${priv?privacyNote("You can see your own savings. Other members' savings are only visible to the committee."):''}`;
+}
+
+function turns(g){
+  const pot=g.amount*g.members.length,cm=g.currentMonth;
+  const rec=g.rotation[cm-1],next=g.rotation[cm];
+  const conf=sum(g.members,mb=>monthStatus(g,mb.id,cm).confirmed);
+  const tid=treasurerId(g);
+  const items=g.rotation.map((id,i)=>{
+    const m=i+1,po=g.outgoing.find(o=>o.kind==='payout'&&o.month===m&&o.status!=='rejected');
+    let cls='',info;
+    if(po&&po.status==='approved'){cls='done';info=pill('approved',`Received ${fmtK(po.amount)} on ${fmtD(po.decidedAt)}`)}
+    else if(po){cls=m===cm?'now':'';info=pill('pending','Payout waiting for approval')}
+    else if(m===cm){cls='now';info=`<span class="meta">This month. ${fmtK(conf)} of ${fmtK(pot)} confirmed so far.</span>`}
+    else if(m<cm){info=pill('bad','Not paid out')}
+    else info=`<span class="meta">Upcoming</span>`;
+    return `<li class="${cls}"><span class="n">${m}</span><div><div class="rname">${esc(nm(g,id))}${id===viewerId(g)?' <span class="muted">(you)</span>':''}</div><div class="rinfo"><span class="meta">${esc(monthLabel(g,m))}</span>${info}</div></div></li>`;
+  }).join('');
+  const tLast=g.rotation[g.rotation.length-1]===tid;
+  return groupHead(g)+`<section class="hero"><h2>This month the pot goes to</h2><p class="who-big">${esc(nm(g,rec))}</p>
+    <p style="margin-top:8px">Everyone pays ${fmtK(g.amount)}, so the full pot is <strong>${fmtK(pot)}</strong>. ${fmtK(conf)} is confirmed so far.</p>
+    ${next?`<p class="meta" style="margin-top:4px">Next: ${esc(nm(g,next))} in ${esc(monthLabel(g,cm+1))}.</p>`:''}
+    ${isT(g)?'<div style="margin-top:12px"><button class="btn small" data-action="pay-receiver">Ask to pay this month\'s receiver</button></div>':''}</section>
+  <section class="section"><h2>Order for receiving the pot</h2><p class="sub">Changing this order needs committee approval.</p><ol class="rot">${items}</ol>
+  ${tLast?`<div class="infobox"><strong>Why the treasurer is last:</strong> ${esc(nm(g,tid))} receives the pot in the final month. Her own money stays in the group until everyone else has been paid, which makes running away with the money far less tempting.</div>`:''}</section>`;
+}
+
+function shareout(g){
+  const T=savedConfirmed(g),inc=r2(sum(g.income,i=>i.amount)),intr=interestEarned(g);
+  const spent=r2(sum(g.outgoing.filter(o=>o.kind==='withdrawal'&&o.status==='approved'),o=>o.amount));
+  const P=r2(T+inc+intr-spent);
+  const vid=viewerId(g),priv=privateView(g),lent=lentOut(g);
+  const waitingAmt=priv?r2(sum(active(g).filter(c=>c.memberId===vid&&c.status!=='confirmed'),c=>c.amount)):r2(sum(active(g).filter(c=>c.status!=='confirmed'),c=>c.amount));
+  const rows=g.members.map(mb=>{const s=savedBy(g,mb.id);return {mb,s,pct:T?s/T*100:0,get:T?r2(P*s/T):0}}).sort((a,b)=>b.s-a.s);
+  const steps=(r,you)=>{const who=you?'You':first(g,r.mb.id);return `<ol class="steps">
+    <li>${who} saved <strong>${fmtK(r.s)}</strong>. The whole group saved <strong>${fmtK(T)}</strong>.</li>
+    <li>${you?'Your':who+"'s"} part of the savings is ${fmtK(r.s)} ÷ ${fmtK(T)}, which is about <strong>${r.pct.toFixed(1)}%</strong>.</li>
+    <li>The group has <strong>${fmtK(P)}</strong> to share.</li>
+    <li>So ${you?'you receive':who+' receives'} ${fmtK(r.s)} ÷ ${fmtK(T)} × ${fmtK(P)} = <strong>${fmtK(r.get)}</strong>.</li></ol>`};
+  const me=rows.find(r=>r.mb.id===vid);
+  const totalShares=r2(sum(rows,r=>r.get));
+  const list=rows.map(r=>`<details class="share"><summary><span><strong>${esc(r.mb.name)}</strong>${r.mb.id===vid?' <span class="muted">(you)</span>':''}<span class="pct" style="display:block">Saved ${fmtK(r.s)}, ${r.pct.toFixed(1)}% of savings</span></span><span class="get">${fmtK(r.get)}<span class="open-hint" style="display:block">See the maths</span></span></summary><div class="body">${steps(r,r.mb.id===vid)}</div></details>`).join('');
+  const everyone=priv?`<section class="section">${privacyNote("Only the committee can see everyone's share-out. You can always see yours, and the group totals above, so you can check that the money to share adds up.")}</section>`
+    :`<section class="section"><h2>Everyone's share-out</h2><p class="sub">Visible to the committee only. Tap a name to see how the amount is worked out.</p><div class="list">${list}</div>
+    <p class="meta" style="margin-top:10px">Check: all shares added together come to ${fmtK(totalShares)}${Math.abs(totalShares-P)>0.001?`, a difference of ${fmtK(Math.abs(totalShares-P))} from rounding to the ngwee`:', the same as the money to share'}.</p></section>`;
+  return groupHead(g)+`<div class="screen-head"><h2>Share-out</h2></div>
+  <p class="muted" style="margin-top:4px">The cycle ends in Month ${g.cycle} (${esc(monthLabel(g,g.cycle))}). These figures show what would be shared if the share-out happened today. Only confirmed savings and confirmed loan repayments are counted.</p>
+  ${waitingAmt>0?`<div class="warnbox">${fmtK(waitingAmt)} of ${priv?'your':''} savings is still waiting for confirmation or disputed, so it is not counted yet.</div>`:''}
+  <section class="section"><h2>Money to share</h2><ul class="calc">
+    <li><span>Confirmed savings</span><span class="v">${fmtK(T)}</span></li>
+    <li><span>Plus loan interest received</span><span class="v">+ ${fmtK(intr)}</span></li>
+    <li><span>Plus fees and fines collected</span><span class="v">+ ${fmtK(inc)}</span></li>
+    <li><span>Minus approved group spending</span><span class="v">− ${fmtK(spent)}</span></li>
+    <li class="total"><span>Money to share</span><span class="v">${fmtK(P)}</span></li></ul>
+    ${lent>0?`<p class="hint">${fmtK(lent)} is still lent out to members. All loans must be fully repaid before the share-out.</p>`:''}</section>
+  ${me?`<section class="hero"><h2>Your share-out today</h2><p class="who-big">${fmtK(me.get)}</p>${steps(me,true)}</section>`:''}
+  ${everyone}`;
+}
+
+function loanCard(g,l,vid){
+  const c=lcalc(g,l),own=l.memberId===vid;
+  let st;
+  if(l.status==='requested')st=pill('pending','Waiting for committee approval');
+  else if(l.status==='rejected')st=pill('rejected');
+  else if(l.status==='approved')st=pill('tosend');
+  else if(l.status==='repaid')st=pill('repaid');
+  else st=c.overdue?pill('overdue',`Overdue since ${monthLabel(g,c.dueMonth)}`):pill('repaying');
+  const due=c.dueMonth?`by the end of ${monthLabel(g,c.dueMonth)}`:`${plural(l.months,'month','months')} after it is sent`;
+  const rps=l.repayments.slice().sort((a,b)=>a.time-b.time).map(r=>{
+    const acts=own&&r.status==='waiting'?`<span class="actions" style="margin:0"><button class="btn small" data-action="rp-confirm" data-loan="${l.id}" data-id="${r.id}">Yes, I paid this</button><button class="btn small danger-ghost" data-action="rp-dispute" data-loan="${l.id}" data-id="${r.id}">This is wrong</button></span>`:'';
+    return `<div class="rp"><span><strong class="num">${fmtK(r.amount)}</strong> <span class="meta">on ${fmtD(r.time)}, ${esc(M(r.method).label)}${r.ref?', ref '+esc(r.ref):''}</span></span>${pill(r.status)}${acts}</div>`}).join('');
+  let acts='';
+  if(isT(g)&&l.status==='approved')acts+=`<button class="btn small" data-action="loan-send" data-id="${l.id}">Send the money</button>`;
+  if(isT(g)&&l.status==='active')acts+=`<button class="btn small" data-action="loan-repay" data-id="${l.id}">Record a repayment</button>`;
+  if(own&&l.sentAt&&!l.receivedAt)acts+=`<button class="btn small" data-action="loan-received" data-id="${l.id}">Yes, I received ${fmtK(l.amount)}</button>`;
+  return `<article class="loan"><div class="loan-top"><div><h3>${esc(nm(g,l.memberId))}${own?' <span class="muted" style="font-size:15px;font-weight:400">(you)</span>':''}</h3><p class="meta">"${esc(l.purpose)}", asked on ${fmtD(l.requestedAt)}</p></div>${st}</div>
+    <ul class="calc">
+      <li><span>Borrowed</span><span class="v">${fmtK(l.amount)}</span></li>
+      <li><span>Interest (${g.loanRate}% a month × ${plural(l.months,'month','months')})</span><span class="v">+ ${fmtK(c.interest)}</span></li>
+      <li class="total"><span>Total to repay</span><span class="v">${fmtK(c.total)}</span></li>
+      <li><span>Each month</span><span class="v">${fmtK(c.monthly)}</span></li>
+      ${l.sentAt?`<li><span>Repaid so far</span><span class="v">${fmtK(c.paid)}</span></li><li><span>Still to pay</span><span class="v">${fmtK(c.remaining)}</span></li>`:''}
+    </ul>
+    ${l.sentAt?`<div class="progress" role="img" aria-label="${Math.round(c.paid/c.total*100)}% repaid"><span style="width:${Math.min(100,c.paid/c.total*100)}%"></span></div>`:''}
+    <p class="meta" style="margin-top:8px">${l.sentAt?`Sent on ${fmtD(l.sentAt)} (ref ${esc(l.sentRef)}). ${l.receivedAt?'Receipt confirmed by '+esc(first(g,l.memberId))+'.':'Not yet confirmed as received.'} `:''}Repay ${due}.</p>
+    ${rps?`<div style="margin-top:8px">${rps}</div>`:''}
+    ${acts?`<div class="actions">${acts}</div>`:''}</article>`;
+}
+function loans(g){
+  const vid=viewerId(g),adm=isAdm(g),lent=lentOut(g);
+  const activeLoans=g.loans.filter(l=>l.status==='active');
+  const mine=g.loans.filter(l=>l.memberId===vid).sort((a,b)=>b.requestedAt-a.requestedAt);
+  const order={approved:0,requested:1,active:2,repaid:3,rejected:4};
+  const all=g.loans.slice().sort((a,b)=>(order[a.status]-order[b.status])||(lcalc(g,b).overdue-lcalc(g,a).overdue)||(b.requestedAt-a.requestedAt));
+  const rules=`<div class="rules">
+    <div class="rule-item"><strong>${g.loanRate}% a month</strong><span>Interest on the amount borrowed, for each month of the loan.</span></div>
+    <div class="rule-item"><strong>${g.loanMultiple} × your savings</strong><span>The most you can borrow.</span></div>
+    <div class="rule-item"><strong>Up to ${plural(g.loanMaxMonths,'month','months')}</strong><span>Time to repay. One loan at a time.</span></div></div>
+    <p class="hint" style="margin-top:8px">Repayments pay off the interest first, then the amount borrowed. All interest goes to the group and is shared out at the end of the cycle, so borrowers also get a share of it. Changing these rules needs committee approval.</p>`;
+  const summary=`<div class="formcard" style="padding:16px"><span class="big">${fmtK(lent)}</span> <span class="muted">lent out to ${plural(activeLoans.length,'member','members')} right now. ${fmtK(interestEarned(g))} interest received so far.</span></div>`;
+  const body=adm
+    ?`<section class="section"><h2>All loans</h2><p class="sub">Visible to the committee only.</p><div class="list">${all.length?all.map(l=>loanCard(g,l,vid)).join(''):'<p class="empty">No loans yet.</p>'}</div></section>`
+    :`<section class="section"><h2>My loans</h2><div class="list">${mine.length?mine.map(l=>loanCard(g,l,vid)).join(''):'<p class="empty">You have not borrowed from the group yet.</p>'}</div>${privacyNote("Other members' loans are only visible to the committee. Everyone can see the total lent out.")}</section>`;
+  return groupHead(g)+`<div class="screen-head"><h2>Loans</h2><button class="btn" data-action="go" data-screen="loanreq">Ask for a loan</button></div>
+  ${summary}<section class="section"><h2>Group loan rules</h2>${rules}</section>${body}`;
+}
+function loanreq(g){
+  const vid=viewerId(g),saved=savedBy(g,vid),limit=r2(saved*g.loanMultiple),h=holdings(g),avail=r2(h.bank+h.momo+h.cash);
+  const open=openLoan(g,vid);
+  const amt=Math.min(1000,limit)||'';
+  const block=open?`<div class="warnbox"><strong>You already have a loan ${open.status==='active'?'being repaid':'waiting'}.</strong> The group allows one loan at a time, so you can ask again once it is fully repaid. You can still use the calculator below to see how a loan would work.</div>`:'';
+  return backTo('loans','Loans')+`<h1 class="page-title">Ask for a loan</h1>
+  <p class="lede">The committee will look at your request. The calculation below shows exactly what you would pay back.</p>
+  <div id="ln-errors"></div>${block}
+  <div class="infobox">Your confirmed savings are <strong>${fmtK(saved)}</strong>, so you can borrow up to <strong>${fmtK(limit)}</strong> (${g.loanMultiple} × your savings).</div>
+  <div class="formcard">
+    <div class="field"><label for="ln-amount">How much do you want to borrow? (K)</label><input type="number" id="ln-amount" inputmode="decimal" min="0" step="1" value="${amt}"></div>
+    <div class="field"><label for="ln-months">How many months to repay?</label><select id="ln-months">${Array.from({length:g.loanMaxMonths},(_,i)=>`<option value="${i+1}"${i+1===2&&g.loanMaxMonths>=2?' selected':''}>${plural(i+1,'month','months')}</option>`).join('')}</select></div>
+    <div class="calcbox" id="ln-calc" aria-live="polite">${loanCalcBox(g,amt,Math.min(2,g.loanMaxMonths))}</div>
+    <div class="field"><label for="ln-purpose">What is the loan for?</label><input type="text" id="ln-purpose" placeholder="For example: buy stock for my shop"><p class="hint">The committee reads this before voting.</p></div>
+    <div class="form-actions"><button class="btn" data-action="save-loan"${open?' disabled':''}>Send loan request</button><button class="btn ghost" data-action="go" data-screen="loans">Cancel</button></div>
+    <p class="hint">The group has ${fmtK(avail)} available to lend right now.</p>
+  </div>`;
+}
+function loanCalcBox(g,amount,months){
+  const a=parseFloat(amount);
+  if(!(a>0))return '<h3>How the loan works out</h3><p class="meta" style="margin-top:6px">Enter an amount to see the calculation.</p>';
+  return `<h3>How the loan works out</h3>${loanSteps(g,r2(a),months,true)}<p class="meta">The interest goes to the group, and you get a share of it back at share-out.</p>`;
+}
+
+function approvals(g){
+  const vid=viewerId(g),priv=privateView(g),adm=isAdm(g);
+  const vis=g.outgoing.filter(o=>!priv||o.kind!=='loan'||o.subject===vid);
+  const sorted=vis.slice().sort((a,b)=>b.createdAt-a.createdAt);
+  const pend=sorted.filter(o=>o.status==='pending'),done=sorted.filter(o=>o.status!=='pending');
+  const card=o=>{
+    const src=o.sources?Object.keys(o.sources).filter(k=>o.sources[k]>0).map(k=>`${fmtK(o.sources[k])} from ${srcName(g,k)}`).join(', '):'';
+    const vlist=o.approvals.map(a=>`<li><span class="v-yes" aria-hidden="true">✓</span><span>${esc(nm(g,a.id))} (${ROLE[mem(g,a.id).role]}) said yes, ${fmtDT(a.time)}</span></li>`).concat(o.rejections.map(r=>`<li><span class="v-no" aria-hidden="true">✕</span><span>${esc(nm(g,r.id))} (${ROLE[mem(g,r.id).role]}) said no${r.reason?': "'+esc(r.reason)+'"':''}</span></li>`)).join('');
+    let extra='';
+    if(o.kind==='loan'){
+      const c=lcalc(g,g.loans.find(l=>l.id===o.loanId));
+      extra=`<p class="meta">Reason: "${esc(o.reason)}". Interest ${fmtK(c.interest)}, total to repay ${fmtK(c.total)} (${fmtK(c.monthly)} a month).${adm?` ${esc(first(g,o.to))}'s savings: ${fmtK(savedBy(g,o.to))}, so the limit is ${fmtK(savedBy(g,o.to)*g.loanMultiple)}.`:''}</p>`;
+    }
+    let acts='';
+    if(canVote(g,o,vid))acts=`<div class="actions"><button class="btn small" data-action="vote-yes" data-id="${o.id}">Approve</button><button class="btn small danger-ghost" data-action="vote-no" data-id="${o.id}">Reject</button></div>`;
+    else if(o.status==='pending'&&o.requestedBy===vid)acts=`<p class="note plain">You asked for this, so the committee must approve it.</p>`;
+    else if(o.status==='pending'&&adm)acts=`<p class="note plain">You have already voted.</p>`;
+    return `<article class="req"><div class="req-top"><h3>${esc(o.title)}</h3>${pill(o.status)}</div>
+      <p class="meta" style="margin-top:4px">Asked by ${esc(nm(g,o.requestedBy))} on ${fmtDT(o.createdAt)}.${o.kind==='typechange'&&o.reason?' Reason: "'+esc(o.reason)+'"':''}</p>
+      ${extra}${src?`<p class="meta">Taken from: ${esc(src)}.</p>`:''}
+      ${o.status==='pending'?`<p class="rule">${RULE_TEXT}</p>`:''}
+      ${vlist?`<ul class="votes">${vlist}</ul>`:'<p class="meta" style="margin-top:8px">No votes yet.</p>'}${acts}</article>`;
+  };
+  return groupHead(g)+`<div class="screen-head"><h2>Approvals</h2>${isT(g)?'<button class="btn" data-action="go" data-screen="request">Ask to pay out money</button>':''}</div>
+  <p class="muted" style="margin-top:4px">Money only leaves the group after 2 committee members say yes, including the chairperson or vice chairperson. ${adm?'':'Ordinary members can see every decision, but only the committee votes.'}</p>
+  ${priv?privacyNote("Loan requests from other members are private to the committee."):''}
+  <section class="section"><h2>Waiting for approval</h2><div class="list">${pend.length?pend.map(card).join(''):'<p class="empty">Nothing is waiting for approval.</p>'}</div></section>
+  <section class="section"><h2>Decided</h2><div class="list">${done.length?done.map(card).join(''):'<p class="empty">No decisions yet.</p>'}</div></section>`;
+}
+
+function fillSources(amount,h,order){
+  const out={bank:0,momo:0,cash:0};let left=r2(amount);
+  order.forEach(k=>{const t=Math.min(left,Math.max(0,h[k]));out[k]=r2(t);left=r2(left-t)});
+  return out;
+}
+function request(g){
+  if(!isT(g))return groupHead(g)+`<p class="infobox">Only the treasurer can ask to pay out money.</p>`;
+  const kinds=g.type==='chilimba'?[['payout',"Pay this month's receiver"],['withdrawal','Other group spending']]:[['withdrawal','Group spending']];
+  if(!kinds.some(k=>k[0]===S.reqKind))S.reqKind=kinds[0][0];
+  const h=holdings(g),cm=g.currentMonth;
+  let top='',amount='';
+  if(S.reqKind==='payout'){
+    const rec=g.rotation[cm-1],pot=g.amount*g.members.length;
+    const ex=g.outgoing.find(o=>o.kind==='payout'&&o.month===cm&&o.status!=='rejected');
+    const notConf=g.members.filter(mb=>monthStatus(g,mb.id,cm).status!=='confirmed');
+    top=`<div class="infobox">This month's receiver is <strong>${esc(nm(g,rec))}</strong>. The full pot is ${fmtK(pot)}.</div>`;
+    if(ex)top+=`<div class="errors">A payout for ${esc(mLabel(g,cm))} has already been ${ex.status==='pending'?'requested and is waiting for approval':'approved'}.</div>`;
+    if(notConf.length)top+=`<div class="warnbox"><strong>${plural(notConf.length,'payment is','payments are')} not confirmed yet for this month:</strong> ${esc(notConf.map(m=>m.name).join(', '))}. You can still ask, but the committee may want to wait.</div>`;
+    amount=Math.min(pot,h.bank+h.momo+h.cash);
+  }
+  const src=amount?fillSources(amount,h,['momo','cash','bank']):{bank:0,momo:0,cash:0};
+  return backTo('approvals','Approvals')+`<h1 class="page-title">Ask to pay out money</h1>
+  <p class="lede">Your request goes to the committee. The money is only counted as paid out once it is approved.</p>
+  <div id="req-errors"></div>${top}
+  <div class="formcard">
+    <div class="field"><span class="label">What is the money for?</span><div class="chips" role="radiogroup">${kinds.map(([k,l])=>`<label class="chip"><input type="radio" name="r-kind" value="${k}"${S.reqKind===k?' checked':''}><span>${l}</span></label>`).join('')}</div></div>
+    ${S.reqKind==='withdrawal'?`<div class="field"><label for="r-reason">Reason</label><input type="text" id="r-reason" placeholder="For example: bank account charge"><p class="hint">Be specific. The committee will read this before voting.</p></div>`:''}
+    <div class="field"><label for="r-amount">Amount (K)</label><input type="number" id="r-amount" inputmode="decimal" min="0" step="0.01" value="${amount||''}"></div>
+    <div class="field"><span class="label">Take the money from</span><p class="hint" style="margin:0 0 6px">Filled in for you. You can change the amounts.</p>
+      ${['momo','cash','bank'].map(k=>`<div class="srcrow"><label for="src-${k}" style="font-weight:400">${esc(locName(g,k))}<span class="meta" style="display:block">Available: ${fmtK(h[k])}</span></label><input type="number" id="src-${k}" inputmode="decimal" min="0" step="0.01" value="${src[k]||''}"></div>`).join('')}
+    </div>
+    <div class="form-actions"><button class="btn" data-action="save-request">Send for approval</button><button class="btn ghost" data-action="go" data-screen="approvals">Cancel</button></div>
+  </div>`;
+}
+
+function move(g){
+  if(!isT(g))return groupHead(g)+`<p class="infobox">Only the treasurer can record money moved to the bank.</p>`;
+  const h=holdings(g);
+  return backTo('overview','Overview')+`<h1 class="page-title">Move money to the bank</h1>
+  <p class="lede">Putting money into the group bank account makes it safer, so it does not need approval. It is still recorded in the history.</p>
+  <div id="mv-errors"></div>
+  <div class="formcard">
+    <div class="field"><span class="label">Move from</span><div class="chips" role="radiogroup">
+      <label class="chip"><input type="radio" name="mv-from" value="momo" checked><span>Mobile money (${fmtK(h.momo)})</span></label>
+      <label class="chip"><input type="radio" name="mv-from" value="cash"><span>Cash (${fmtK(h.cash)})</span></label></div></div>
+    <div class="field"><label for="mv-amount">Amount (K)</label><input type="number" id="mv-amount" inputmode="decimal" min="0" step="0.01" value="${h.momo>0?h.momo:''}"></div>
+    <div class="field"><label for="mv-ref">Deposit slip or transaction number</label><input type="text" id="mv-ref" autocomplete="off"><p class="hint">This lets the committee check the deposit with the bank.</p></div>
+    <div class="form-actions"><button class="btn" data-action="save-move">Record the deposit</button><button class="btn ghost" data-action="go" data-screen="overview">Cancel</button></div>
+  </div>`;
+}
+
+function history(g){
+  const all=g.history.filter(h=>histVisible(g,h)).sort((a,b)=>b.time-a.time);
+  const show=all.slice(0,S.histLimit);
+  const rows=show.map(h=>{const m=h.actor?mem(g,h.actor):null;return `<div class="hentry"><span class="when">${fmtDT(h.time)}</span><span class="who-line">${esc(h.actor?nm(g,h.actor):'Usambazi (automatic)')}${m&&m.role!=='member'?`<span class="role-tag">${ROLE[m.role]}</span>`:''}</span><span>${esc(h.text)}</span></div>`}).join('');
+  return groupHead(g)+`<div class="screen-head"><h2>History</h2></div>
+  <p class="muted" style="margin-top:4px">Every action in this group, newest first. Nobody can edit or remove anything here, not even the treasurer or chairperson.</p>
+  ${privateView(g)?privacyNote("You see group-wide actions and everything about your own money. Entries about other members' money are visible to the committee only."):''}
+  <div class="list">${rows}</div>
+  ${all.length>show.length?`<div class="form-actions"><button class="btn ghost" data-action="more-hist">Show older entries (${all.length-show.length} more)</button></div>`:''}`;
+}
+
+function createScreen(){
+  const d=S.draft,ch=d.type==='chilimba',max=MAXM[d.type];
+  const rowsHtml=d.members.map((m,i)=>`<div class="mrow">
+    <div><label for="cm-name-${i}">Member ${i+1} name</label><input type="text" id="cm-name-${i}" value="${esc(m.name)}" autocomplete="off"></div>
+    <div><label for="cm-phone-${i}">Phone</label><input type="tel" id="cm-phone-${i}" value="${esc(m.phone)}" placeholder="097 000 0000"></div>
+    <div><label for="cm-role-${i}">Role</label><select id="cm-role-${i}">${ROLE_ORDER.map(r=>`<option value="${r}"${m.role===r?' selected':''}>${ROLE[r]}</option>`).join('')}</select></div>
+    <div>${d.members.length>MINM?`<button class="btn small ghost x" data-action="cg-remove" data-i="${i}" aria-label="Remove member ${i+1}">Remove</button>`:''}</div></div>`).join('');
+  const now=new Date();
+  const startOpts=[0,1,2].map(k=>{const dt=new Date(now.getFullYear(),now.getMonth()+k,1);return `<option value="${k}"${String(d.start)===String(k)?' selected':''}>${MONTHS[dt.getMonth()]} ${dt.getFullYear()}</option>`}).join('');
+  const atMax=d.members.length>=max;
+  return `<button class="back" data-action="home">${icon('back')}All groups</button><h1 class="page-title">Create a group</h1>
+  <p class="lede">Choose the type carefully. After the group is created, the type is locked and changing it needs committee approval.</p>
+  <div id="cg-errors"></div>
+  <div class="formcard">
+    <div class="field"><label for="cg-name">Group name</label><input type="text" id="cg-name" value="${esc(d.name)}" placeholder="For example: Chawama Market Chilimba"></div>
+    <div class="field"><span class="label">Type of group</span><div class="typecards" role="radiogroup">
+      <label class="typecard"><input type="radio" name="cg-type" value="chilimba"${ch?' checked':''}><span class="tc"><strong>Chilimba</strong><span>Everyone pays the same amount every month. Each month, one member receives the whole pot, in turn. Up to 20 members.</span></span></label>
+      <label class="typecard"><input type="radio" name="cg-type" value="village"${!ch?' checked':''}><span class="tc"><strong>Village Banking</strong><span>Members save different amounts and can take loans. At the end of the cycle, money is shared out by how much each person saved. Up to 35 members.</span></span></label></div></div>
+    <div class="field"><label for="cg-amount">${ch?'Amount each member pays every month (K)':'Minimum saving each month (K)'}</label><input type="number" id="cg-amount" inputmode="decimal" min="0" value="${esc(d.amount)}"></div>
+    ${ch?'<p class="hint">In a chilimba, the cycle is one month per member, so it is set for you.</p>':`<div class="field"><label for="cg-cycle">Cycle length (months)</label><input type="number" id="cg-cycle" inputmode="numeric" min="1" max="24" value="${esc(d.cycle)}"><p class="hint">The share-out happens at the end of the cycle.</p></div>
+    <div class="field"><label for="cg-rate">Loan interest (% per month)</label><input type="number" id="cg-rate" inputmode="decimal" min="0" max="50" value="${esc(d.rate)}"><p class="hint">Charged on the amount borrowed, for each month of the loan.</p></div>
+    <div class="field"><label for="cg-mult">Members can borrow up to this many times their savings</label><input type="number" id="cg-mult" inputmode="numeric" min="1" max="10" value="${esc(d.mult)}"></div>
+    <div class="field"><label for="cg-maxm">Longest time to repay a loan (months)</label><input type="number" id="cg-maxm" inputmode="numeric" min="1" max="12" value="${esc(d.maxm)}"></div>`}
+    <div class="field"><label for="cg-start">First month</label><select id="cg-start">${startOpts}</select></div>
+    <div class="field"><span class="label">Members and roles (${d.members.length} of up to ${max})</span><p class="hint" style="margin:0 0 4px">You need at least ${MINM} members. The committee must have at least ${MIN_COMMITTEE} people, including one chairperson and one treasurer. Suggested committee: chairperson, vice chairperson, treasurer, communications, and a member representative.${ch?' Members receive the pot in this order, but Usambazi always puts the treasurer last.':''}</p>${rowsHtml}
+      <button class="btn small ghost" data-action="cg-add" style="margin-top:8px"${atMax?' disabled':''}>Add another member</button>${atMax?`<p class="hint">A ${TYPE[d.type].toLowerCase()} can have up to ${max} members.</p>`:''}</div>
+    <div class="form-actions"><button class="btn" data-action="save-group">Create group</button><button class="btn ghost" data-action="home">Cancel</button></div>
+  </div>`;
+}
+
+const SCREENS=['overview','payments','record','members','cycle','approvals','request','move','history','loans','loanreq'];
+function screen(g){
+  if(!g)return S.screen==='create'?createScreen():home();
+  switch(S.screen){
+    case 'payments':return payments(g);
+    case 'record':return record(g);
+    case 'members':return members(g);
+    case 'cycle':return g.type==='chilimba'?turns(g):shareout(g);
+    case 'approvals':return approvals(g);
+    case 'request':return request(g);
+    case 'move':return move(g);
+    case 'history':return history(g);
+    case 'loans':return g.type==='village'?loans(g):overview(g);
+    case 'loanreq':return g.type==='village'?loanreq(g):overview(g);
+    default:return overview(g);
+  }
+}
+
+/* ---------- Rendering ---------- */
+const app=document.getElementById('app');
+function render(keepScroll,focusMain){
+  const y=window.scrollY,g=cur();
+  if(g&&!SCREENS.includes(S.screen))S.screen='overview';
+  if(!g&&!['home','create'].includes(S.screen))S.screen='home';
+  app.innerHTML=topbar(g)+`<div class="layout${g?' has-nav':''}">${g?nav(g):''}<main class="content" id="main" tabindex="-1">${screen(g)}</main></div>`;
+  window.scrollTo(0,keepScroll?y:0);
+  if(focusMain){const m=document.getElementById('main');m&&m.focus({preventScroll:true})}
+}
+const go=()=>render(false,true);
+
+let toastTimer;
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{t.hidden=true},3400)}
+function showErrors(id,list){
+  const el=document.getElementById(id);if(!el)return;
+  el.innerHTML=list.length?`<div class="errors">Please fix ${list.length===1?'this':'these'} first:<ul>${list.map(e=>`<li>${esc(e)}</li>`).join('')}</ul></div>`:'';
+  if(list.length&&el.scrollIntoView)el.scrollIntoView({block:'center'});
+}
+const val=id=>{const e=document.getElementById(id);return e?e.value:''};
+const radio=n=>{const e=document.querySelector(`input[name="${n}"]:checked`);return e?e.value:''};
+const mark=(id,bad)=>{const e=document.getElementById(id);if(e)e.setAttribute('aria-invalid',bad?'true':'false')};
+function refUsed(ref,exceptId){
+  const r=normRef(ref);if(!r)return false;
+  return S.groups.some(g=>g.contributions.some(c=>c.id!==exceptId&&normRef(c.ref)===r)||g.loans.some(l=>l.repayments.some(x=>x.id!==exceptId&&normRef(x.ref)===r)));
+}
+
+/* ---------- Modal ---------- */
+const mroot=document.getElementById('modal-root');
+let lastFocus=null;
+function openModal(title,body,saveLabel,onSave,danger){
+  lastFocus=document.activeElement;S.modalSave=onSave;
+  mroot.innerHTML=`<div class="overlay" data-action="modal-bg"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="mt"><h2 id="mt">${title}</h2>${body}<div id="m-err"></div><div class="dialog-actions"><button class="btn ghost" data-action="modal-close">Cancel</button><button class="btn${danger?' danger':''}" data-action="modal-save">${saveLabel}</button></div></div></div>`;
+  const f=mroot.querySelector('input:not([type=radio]),textarea,select');(f||mroot.querySelector('.btn')).focus();
+}
+function closeModal(){mroot.innerHTML='';S.modalSave=null;if(lastFocus&&document.body.contains(lastFocus))lastFocus.focus()}
+
+/* ---------- Handlers ---------- */
+function saveRecord(g){
+  const errs=[];
+  const mid=val('f-member'),amount=parseFloat(val('f-amount')),month=+val('f-month'),method=radio('f-method'),ref=val('f-ref').trim(),date=val('f-date'),note=val('f-note').trim();
+  mark('f-member',!mid);if(!mid)errs.push('Choose who paid.');
+  const okAmt=amount>0;mark('f-amount',!okAmt);if(!okAmt)errs.push('Enter the amount paid, for example 500.');
+  if(!method)errs.push('Choose how they paid.');
+  const m=method?M(method):null;
+  if(m&&m.needsRef){const bad=ref.length<6;mark('f-ref',bad);if(bad)errs.push('Enter the transaction reference from the mobile money message. It lets anyone trace the payment.')}
+  if(m&&m.id!=='cash'&&ref&&refUsed(ref)){mark('f-ref',true);errs.push('This reference number is already used for another payment. Each mobile money payment has its own reference.')}
+  if(!date)errs.push('Choose the date the money was paid.');
+  if(mid&&okAmt&&g.type==='chilimba'){const already=monthStatus(g,mid,month).amount;if(already+amount>g.amount)errs.push(`${nm(g,mid)} already has ${fmtK(already)} recorded for Month ${month}. If an entry is wrong, fix it with a correction instead.`)}
+  showErrors('rec-errors',errs);if(errs.length)return;
+  const now=new Date();const [yy,mo,dd]=date.split('-').map(Number);
+  const t=new Date(yy,mo-1,dd,now.getHours(),now.getMinutes());
+  addContrib(g,{memberId:mid,amount:r2(amount),month,method,ref:m.id==='cash'?'':ref,time:t,recordedBy:treasurerId(g),note});
+  S.payTab='all';S.payMonth='all';S.screen='payments';go();
+  toast(`Payment saved. ${first(g,mid)} will be asked to confirm it.`);
+}
+function disputeModal(title,meta,onSave){
+  openModal(title,`<p class="meta">${meta}</p>
+  <div class="field"><label for="m-reason">Explain what is wrong</label><textarea id="m-reason" placeholder="For example: I sent K500, not K300. My message shows K500."></textarea><p class="hint">The committee will see this until it is fixed.</p></div>`,'Mark as wrong',()=>{
+    const r=val('m-reason').trim();if(r.length<5)return 'Please explain what is wrong in a few words.';
+    onSave(r);
+  },true);
+}
+function openCorrection(g,c){
+  openModal('Fix with a correction',`<p class="meta">The original ${fmtK(c.amount)} entry stays visible. Your correction is added as a new entry, and ${esc(first(g,c.memberId))} will be asked to confirm it.</p>
+  ${c.disputeNote?`<p class="note bad"><strong>${esc(first(g,c.memberId))} said:</strong> "${esc(c.disputeNote)}"</p>`:''}
+  <div class="field"><label for="m-amount">Correct amount (K)</label><input type="number" id="m-amount" inputmode="decimal" min="0" step="0.01" value="${c.amount}"></div>
+  <div class="field"><span class="label">How did they pay?</span>${methodChips('m-method',c.method)}</div>
+  ${refField('m',c.method)}
+  <div class="field"><label for="m-reason">Reason for the correction</label><textarea id="m-reason" placeholder="For example: I typed K300 by mistake. The Airtel message shows K500."></textarea></div>`,'Save correction',()=>{
+    const amount=parseFloat(val('m-amount')),method=radio('m-method'),ref=val('m-ref').trim(),reason=val('m-reason').trim();
+    if(!(amount>0))return 'Enter the correct amount.';
+    if(!method)return 'Choose how they paid.';
+    if(M(method).needsRef&&ref.length<6)return 'Enter the transaction reference from the mobile money message.';
+    if(M(method).id!=='cash'&&ref&&normRef(ref)!==normRef(c.ref)&&refUsed(ref,c.id))return 'This reference number is already used for another payment.';
+    if(reason.length<5)return 'Explain why you are making this correction. The committee will read it.';
+    addCorrection(g,c,{amount:r2(amount),method,ref:M(method).id==='cash'?'':ref,reason});
+    render(true);toast(`Correction saved. ${first(g,c.memberId)} will be asked to confirm it.`);
+  });
+  const r=document.getElementById('m-ref');if(r)r.value=c.ref||'';
+}
+function openReject(g,o){
+  openModal('Reject this request?',`<p>${esc(o.title)}</p><div class="field"><label for="m-reason">Reason (optional)</label><textarea id="m-reason" placeholder="For example: this is not allowed by our group rules"></textarea></div>`,'Reject request',()=>{
+    vote(g,o,viewerId(g),'no',new Date(),val('m-reason').trim());render(true);toast(o.status==='rejected'?'Request rejected. No money was moved.':'Your no vote is recorded.');
+  },true);
+}
+function askType(g){
+  const nt=g.type==='chilimba'?'village':'chilimba';
+  openModal('Ask to change the group type',`<p>The group is a <strong>${TYPE[g.type]}</strong>. You are asking to change it to <strong>${TYPE[nt]}</strong>. This needs committee approval, and it would start with the next cycle so that no one's current money is affected.</p>
+  <div class="field"><label for="m-reason">Why do you want to change it?</label><textarea id="m-reason"></textarea></div>`,'Send for approval',()=>{
+    const r=val('m-reason').trim();if(r.length<5)return 'Please give a reason. The committee will read it before voting.';
+    addOut(g,{kind:'typechange',newType:nt,reason:r,requestedBy:viewerId(g),time:new Date()});render(true);toast('Request sent. The committee can vote on it in Approvals.');
+  });
+}
+function saveRequest(g){
+  const errs=[],h=holdings(g),kind=S.reqKind,cm=g.currentMonth;
+  const amount=parseFloat(val('r-amount'));const reason=kind==='withdrawal'?val('r-reason').trim():'';
+  if(!(amount>0)){errs.push('Enter the amount.');mark('r-amount',true)}
+  if(kind==='withdrawal'&&reason.length<4){errs.push('Give a clear reason for the spending.');mark('r-reason',true)}
+  if(kind==='payout'&&g.outgoing.some(o=>o.kind==='payout'&&o.month===cm&&o.status!=='rejected'))errs.push(`A payout for Month ${cm} already exists.`);
+  const src={};let tot=0;
+  ['momo','cash','bank'].forEach(k=>{const v=parseFloat(val('src-'+k))||0;src[k]=r2(v);tot+=v;if(v<0)errs.push('Amounts cannot be negative.');if(v>h[k]+0.001){errs.push(`Only ${fmtK(h[k])} is in ${srcName(g,k)}.`);mark('src-'+k,true)}});
+  tot=r2(tot);
+  if(amount>0&&Math.abs(tot-amount)>0.001)errs.push(`The amounts you are taking add up to ${fmtK(tot)}, but the request is for ${fmtK(amount)}. They must match.`);
+  showErrors('req-errors',errs);if(errs.length)return;
+  addOut(g,{kind,month:kind==='payout'?cm:undefined,to:kind==='payout'?g.rotation[cm-1]:undefined,amount:r2(amount),sources:src,reason,requestedBy:treasurerId(g),time:new Date()});
+  S.screen='approvals';go();toast('Request sent. It needs 2 committee members to say yes.');
+}
+function saveMove(g){
+  const errs=[],h=holdings(g);const from=radio('mv-from'),amount=parseFloat(val('mv-amount')),ref=val('mv-ref').trim();
+  if(!(amount>0)){errs.push('Enter the amount moved.');mark('mv-amount',true)}
+  else if(amount>h[from]+0.001){errs.push(`Only ${fmtK(h[from])} is held as ${from==='momo'?'mobile money':'cash'}.`);mark('mv-amount',true)}
+  if(ref.length<3){errs.push('Enter the deposit slip or transaction number so the committee can check it.');mark('mv-ref',true)}
+  showErrors('mv-errors',errs);if(errs.length)return;
+  const tid=treasurerId(g),t=new Date();
+  g.transfers.push({id:nid('t'),from,to:'bank',amount:r2(amount),time:t,by:tid,ref});
+  hist(g,tid,`Moved ${fmtK(amount)} from ${from==='momo'?'mobile money':'cash'} to the group bank account. Deposit reference: ${ref}.`,t);
+  S.screen='overview';go();toast('Deposit recorded. The money is now shown in the group bank account.');
+}
+function saveLoan(g){
+  const vid=viewerId(g),errs=[],saved=savedBy(g,vid),limit=r2(saved*g.loanMultiple),h=holdings(g),avail=r2(h.bank+h.momo+h.cash);
+  const amount=parseFloat(val('ln-amount')),months=+val('ln-months'),purpose=val('ln-purpose').trim();
+  if(openLoan(g,vid))errs.push('You already have a loan. You can ask again once it is fully repaid.');
+  if(!(amount>0)){errs.push('Enter how much you want to borrow.');mark('ln-amount',true)}
+  else if(amount>limit+0.001){errs.push(`The most you can borrow is ${fmtK(limit)} (${g.loanMultiple} × your savings of ${fmtK(saved)}).`);mark('ln-amount',true)}
+  else if(amount>avail+0.001){errs.push(`The group only has ${fmtK(avail)} available to lend right now.`);mark('ln-amount',true)}
+  if(purpose.length<4){errs.push('Say what the loan is for. The committee reads this before voting.');mark('ln-purpose',true)}
+  showErrors('ln-errors',errs);if(errs.length)return;
+  requestLoan(g,vid,r2(amount),months,purpose,new Date());
+  S.screen='loans';go();toast('Loan request sent to the committee.');
+}
+function openSend(g,l){
+  const h=holdings(g);
+  const firstOk=['bank','momo','cash'].find(k=>h[k]>=l.amount)||'bank';
+  openModal(`Send ${fmtK(l.amount)} to ${esc(nm(g,l.memberId))}`,`<p class="meta">The loan is approved. Record where the money came from, so the committee can trace it. ${esc(first(g,l.memberId))} will be asked to confirm receiving it.</p>
+  <div class="field"><span class="label">Send from</span><div class="chips" role="radiogroup">${['bank','momo','cash'].map(k=>`<label class="chip"><input type="radio" name="sd-from" value="${k}"${k===firstOk?' checked':''}><span>${esc(locName(g,k))} (${fmtK(h[k])})</span></label>`).join('')}</div></div>
+  <div class="field"><label for="sd-ref">Transaction or withdrawal slip number</label><input type="text" id="sd-ref" autocomplete="off"></div>`,'Record as sent',()=>{
+    const src=radio('sd-from'),ref=val('sd-ref').trim();
+    if(h[src]<l.amount-0.001)return `Only ${fmtK(h[src])} is in ${srcName(g,src)}. Choose another place.`;
+    if(ref.length<3)return 'Enter the transaction or slip number.';
+    sendLoan(g,l,src,ref,new Date(),g.currentMonth);render(true);toast(`Loan recorded as sent. ${first(g,l.memberId)} will be asked to confirm.`);
+  });
+}
+function openRepay(g,l){
+  const c=lcalc(g,l),mem_=mem(g,l.memberId);
+  const lastMethod=(l.repayments[l.repayments.length-1]||{}).method||'';
+  openModal(`Record a repayment from ${esc(mem_.name)}`,`<p class="meta">Still to pay: ${fmtK(c.remaining)}. The monthly amount is ${fmtK(c.monthly)}.</p>
+  <div class="field"><label for="m-amount">Amount repaid (K)</label><input type="number" id="m-amount" inputmode="decimal" min="0" step="0.01" value="${Math.min(c.monthly,c.remaining)}"></div>
+  <div class="field"><span class="label">How did they pay?</span>${methodChips('m-method',lastMethod)}</div>
+  ${refField('m',lastMethod)}`,'Save repayment',()=>{
+    const amount=parseFloat(val('m-amount')),method=radio('m-method'),ref=val('m-ref').trim();
+    if(!(amount>0))return 'Enter the amount repaid.';
+    if(amount>c.remaining+0.001)return `That is more than the ${fmtK(c.remaining)} still to pay.`;
+    if(!method)return 'Choose how they paid.';
+    if(M(method).needsRef&&ref.length<6)return 'Enter the transaction reference from the mobile money message.';
+    if(M(method).id!=='cash'&&ref&&refUsed(ref))return 'This reference number is already used for another payment.';
+    addRepay(g,l,{amount:r2(amount),method,ref:M(method).id==='cash'?'':ref,time:new Date(),month:g.currentMonth});
+    render(true);toast(l.status==='repaid'?'Repayment saved. The loan is now fully repaid.':`Repayment saved. ${first(g,l.memberId)} will be asked to confirm it.`);
+  });
+}
+function syncDraft(){
+  const d=S.draft;if(!d||!document.getElementById('cg-name'))return;
+  d.name=val('cg-name');d.amount=val('cg-amount');d.start=val('cg-start');
+  if(document.getElementById('cg-cycle')){d.cycle=val('cg-cycle');d.rate=val('cg-rate');d.mult=val('cg-mult');d.maxm=val('cg-maxm')}
+  d.members.forEach((m,i)=>{m.name=val('cm-name-'+i);m.phone=val('cm-phone-'+i);m.role=val('cm-role-'+i)});
+}
+function saveGroup(){
+  syncDraft();const d=S.draft,errs=[];
+  const name=d.name.trim(),amount=parseFloat(d.amount),ms=d.members.filter(m=>m.name.trim()),max=MAXM[d.type];
+  if(!name){errs.push('Give the group a name.');mark('cg-name',true)}
+  if(!(amount>0)){errs.push('Enter the monthly amount.');mark('cg-amount',true)}
+  if(ms.length<MINM)errs.push(`Add at least ${MINM} members.`);
+  if(ms.length>max)errs.push(`A ${TYPE[d.type].toLowerCase()} can have up to ${max} members. You have ${ms.length}.`);
+  const count=r=>ms.filter(m=>m.role===r).length;
+  if(count('chair')!==1)errs.push('Choose exactly one chairperson.');
+  if(count('treasurer')!==1)errs.push('Choose exactly one treasurer.');
+  if(count('vice')>1)errs.push('Choose only one vice chairperson.');
+  const comm=ms.filter(m=>m.role!=='member').length;
+  if(comm<MIN_COMMITTEE)errs.push(`The committee needs at least ${MIN_COMMITTEE} people. You have ${comm}.`);
+  if(count('member')<1)errs.push('Add at least one ordinary member.');
+  const cyc=d.type==='chilimba'?ms.length:parseInt(d.cycle,10);
+  let rate=10,mult=3,maxm=3;
+  if(d.type==='village'){
+    if(!(cyc>=1&&cyc<=24)){errs.push('The cycle must be between 1 and 24 months.');mark('cg-cycle',true)}
+    rate=parseFloat(d.rate);mult=parseFloat(d.mult);maxm=parseInt(d.maxm,10);
+    if(!(rate>=0&&rate<=50)){errs.push('Loan interest must be between 0% and 50% a month.');mark('cg-rate',true)}
+    if(!(mult>=1&&mult<=10)){errs.push('The borrowing limit must be between 1 and 10 times savings.');mark('cg-mult',true)}
+    if(!(maxm>=1&&maxm<=12)){errs.push('The longest repayment time must be between 1 and 12 months.');mark('cg-maxm',true)}
+  }
+  showErrors('cg-errors',errs);if(errs.length)return;
+  const now=new Date(),st=new Date(now.getFullYear(),now.getMonth()+(+d.start||0),1);
+  const g=blankGroup({id:nid('g'),name,type:d.type,amount:r2(amount),cycle:cyc,currentMonth:1,startY:st.getFullYear(),startM:st.getMonth(),loanRate:rate,loanMultiple:mult,loanMaxMonths:maxm});
+  g.members=ms.map(m=>({id:nid('m'),name:m.name.trim(),phone:m.phone.trim()||'No phone given',role:m.role}));
+  const tid=treasurerId(g);
+  g.rotation=g.members.map(m=>m.id).filter(id=>id!==tid).concat([tid]);
+  g.memberView=byRole(g,'member').id;
+  const chair=byRole(g,'chair').id;
+  hist(g,chair,`Created the group as ${d.type==='chilimba'?'a Chilimba':'Village Banking'}: ${g.members.length} members, ${d.type==='chilimba'?fmtK(amount)+' each per month':'at least '+fmtK(amount)+' saved each month'}, ${cyc}-month cycle.${d.type==='village'?` Loans: ${rate}% interest a month, up to ${mult} times savings, repaid within ${plural(maxm,'month','months')}.`:''}`,now);
+  hist(g,chair,`Set up a committee of ${comm}: ${committee(g).map(m=>m.name+' ('+ROLE[m.role]+')').join(', ')}.`,now);
+  if(d.type==='chilimba')hist(g,chair,`Set the order for receiving the pot. The treasurer, ${nm(g,tid)}, receives last.`,now);
+  S.groups.unshift(g);S.gid=g.id;S.screen='overview';S.draft=null;go();toast(`${name} is ready. Records start from ${monthLabel(g,1)}.`);
+}
+function newDraft(){return {name:'',type:'chilimba',amount:'500',cycle:'12',rate:'10',mult:'3',maxm:'3',start:'0',members:['chair','vice','treasurer','comms','rep','member','member'].map(role=>({name:'',phone:'',role}))}}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-action]');if(!b)return;
+  const a=b.dataset.action,g=cur(),id=b.dataset.id;
+  switch(a){
+    case 'home':S.gid=null;S.screen='home';closeModal();go();break;
+    case 'open':S.gid=id;S.screen='overview';S.payTab='mine';S.payMonth='all';S.histLimit=40;go();break;
+    case 'go':S.screen=b.dataset.screen;if(b.dataset.tab)S.payTab=b.dataset.tab;if(S.screen==='request')S.reqKind=null;go();break;
+    case 'tab':S.payTab=b.dataset.tab;render(true);break;
+    case 'confirm':{const c=g.contributions.find(x=>x.id===id);confirmC(g,c);render(true);toast('Thank you. The payment is confirmed.');break;}
+    case 'dispute':{const c=g.contributions.find(x=>x.id===id);disputeModal('What is wrong with this payment?',`${fmtK(c.amount)} for ${esc(mLabel(g,c.month))}, recorded by ${esc(nm(g,c.recordedBy))}.`,r=>{disputeC(g,c,r);render(true);toast('Marked as disputed. The committee can now see it.')});break;}
+    case 'correct':openCorrection(g,g.contributions.find(x=>x.id===id));break;
+    case 'save-record':saveRecord(g);break;
+    case 'vote-yes':{const o=g.outgoing.find(x=>x.id===id);vote(g,o,viewerId(g),'yes');render(true);toast(o.status==='approved'?'Approved. The request now has enough yes votes.':'Your yes vote is recorded. It still needs more approval.');break;}
+    case 'vote-no':openReject(g,g.outgoing.find(x=>x.id===id));break;
+    case 'pay-receiver':S.screen='request';S.reqKind='payout';go();break;
+    case 'save-request':saveRequest(g);break;
+    case 'save-move':saveMove(g);break;
+    case 'save-loan':saveLoan(g);break;
+    case 'loan-send':openSend(g,g.loans.find(l=>l.id===id));break;
+    case 'loan-repay':openRepay(g,g.loans.find(l=>l.id===id));break;
+    case 'loan-received':{const l=g.loans.find(x=>x.id===id);confirmLoanReceived(g,l);render(true);toast('Thank you. Receipt of the loan is confirmed.');break;}
+    case 'rp-confirm':{const l=g.loans.find(x=>x.id===b.dataset.loan);confirmRepay(g,l,l.repayments.find(r=>r.id===id));render(true);toast('Thank you. The repayment is confirmed.');break;}
+    case 'rp-dispute':{const l=g.loans.find(x=>x.id===b.dataset.loan),r=l.repayments.find(x=>x.id===id);disputeModal('What is wrong with this repayment?',`${fmtK(r.amount)} recorded on ${fmtD(r.time)}.`,reason=>{disputeRepay(g,l,r,reason);render(true);toast('Marked as disputed. The committee can now see it.')});break;}
+    case 'remind':{hist(g,viewerId(g),`Sent a payment reminder to ${nm(g,id)} for ${mLabel(g,g.currentMonth)}.`,new Date());render(true);toast(`Reminder recorded for ${first(g,id)}. In the real app this would go by SMS or WhatsApp.`);break;}
+    case 'remind-all':{const np=g.members.filter(mb=>monthStatus(g,mb.id,g.currentMonth).status==='notpaid');hist(g,viewerId(g),`Sent payment reminders to ${np.map(m=>m.name).join(', ')} for ${mLabel(g,g.currentMonth)}.`,new Date());render(true);toast(`${plural(np.length,'reminder','reminders')} recorded.`);break;}
+    case 'ask-type':askType(g);break;
+    case 'more-hist':S.histLimit+=40;render(true);break;
+    case 'new-group':S.gid=null;S.draft=newDraft();S.screen='create';go();break;
+    case 'cg-add':syncDraft();if(S.draft.members.length<MAXM[S.draft.type]){S.draft.members.push({name:'',phone:'',role:'member'});render(true);const el=document.getElementById('cm-name-'+(S.draft.members.length-1));el&&el.focus()}break;
+    case 'cg-remove':syncDraft();S.draft.members.splice(+b.dataset.i,1);render(true);break;
+    case 'save-group':saveGroup();break;
+    case 'modal-close':closeModal();break;
+    case 'modal-bg':if(e.target===b)closeModal();break;
+    case 'modal-save':{
+      if(!S.modalSave)break;const r=S.modalSave();
+      if(typeof r==='string'){document.getElementById('m-err').innerHTML=`<div class="errors">${esc(r)}</div>`}
+      else{mroot.innerHTML='';S.modalSave=null}
+      break;}
+  }
+});
+function updateRefField(prefix,method){
+  const m=M(method),wrap=document.getElementById(prefix+'-refwrap'),cash=document.getElementById(prefix+'-cashhint');
+  if(!wrap)return;
+  wrap.hidden=m.id==='cash';cash.hidden=m.id!=='cash';
+  document.getElementById(prefix+'-reflabel').textContent=m.needsRef?'Transaction reference':'Deposit slip number (optional)';
+  document.getElementById(prefix+'-refhint').textContent=m.hint;
+}
+document.addEventListener('change',e=>{
+  const t=e.target,g=cur();
+  if(t.id==='viewas'){
+    S.role=t.value;
+    if(g&&!isT(g)&&['record','request','move'].includes(S.screen))S.screen={record:'payments',request:'approvals',move:'overview'}[S.screen];
+    render(true);
+    if(g)toast(`Now showing what ${viewer(g).name} sees.`);
+    return;
+  }
+  if(t.id==='pay-month'){S.payMonth=t.value;render(true);return}
+  if(t.name==='f-method'){updateRefField('f',t.value);return}
+  if(t.name==='m-method'){updateRefField('m',t.value);return}
+  if(t.name==='r-kind'){S.reqKind=t.value;render(true);return}
+  if(t.id==='ln-months'){refreshLoanCalc(g);return}
+  if(t.name==='cg-type'){syncDraft();S.draft.type=t.value;render(true);return}
+});
+function refreshLoanCalc(g){const box=document.getElementById('ln-calc');if(box&&g)box.innerHTML=loanCalcBox(g,val('ln-amount'),+val('ln-months'))}
+document.addEventListener('input',e=>{
+  const g=cur();
+  if(e.target.id==='ln-amount'){refreshLoanCalc(g);return}
+  if(e.target.id==='r-amount'&&g){
+    const h=holdings(g);const v=parseFloat(e.target.value)||0;
+    const s=fillSources(v,h,['momo','cash','bank']);
+    ['momo','cash','bank'].forEach(k=>{const el=document.getElementById('src-'+k);if(el)el.value=s[k]||''});
+  }
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mroot.innerHTML)closeModal()});
+
+render(false);
+})();
+</script>
+</body>
+</html>
