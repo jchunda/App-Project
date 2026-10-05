@@ -113,6 +113,7 @@ const ICONS = {
   clock:   '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   eye:     '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   cycle:   '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
+  pie:     '<circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/>',
   shield:  '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>'
 };
 const icon = (name) =>

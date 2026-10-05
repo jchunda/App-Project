@@ -31,7 +31,8 @@ const GROUP_SCREENS = {
   move:     () => moveScreen(),
   approvals: () => approvalsScreen(),
   request:  () => requestScreen(),
-  turns:    () => turnsScreen()
+  turns:    () => turnsScreen(),
+  shareout: () => shareoutScreen()
 };
 
 
@@ -118,8 +119,16 @@ async function loadGroup(groupId) {
     votes = v.data;
   }
 
+  // Village banking: the share-out, worked out by the database.
+  let shareout = null;
+  if (g.data.type === 'village') {
+    const so = await db.rpc('shareout', { gid: groupId });
+    if (so.error) { toast(friendlyError(so.error)); return false; }
+    shareout = so.data;
+  }
+
   S.group = { info: g.data, members: m.data, history: h.data, payments: p.data, deposits: d.data,
-              summary: s.data, requests: r.data, votes };
+              summary: s.data, requests: r.data, votes, shareout };
   return true;
 }
 

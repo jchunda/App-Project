@@ -320,6 +320,7 @@ function groupNav(f) {
        ['history',  'History',  'clock', 0]]
     : [['overview', 'Overview', 'home', 0],
        ['payments', 'Payments', 'receipt', myWaiting],
+       ['shareout', 'Share-out', 'pie', 0],
        ['approvals', 'Approvals', 'shield', myVotes],
        ['members',  'Members',  'people', 0],
        ['history',  'History',  'clock', 0]];
@@ -957,6 +958,91 @@ function turnsScreen() {
     ${treasurerLast ? `<div class="infobox"><strong>Why the treasurer is last:</strong> ${esc(t.full_name)} receives the pot in the final month.
       The treasurer's own money stays in the group until everyone else has been paid, which makes running away with the money far less tempting.</div>` : ''}
   </section>`;
+}
+
+
+/* ---------- Share-out (village banking) ---------- */
+function shareoutScreen() {
+  const f = groupFacts();
+  const { G, g, me, priv } = f;
+  if (g.type !== 'village' || !G.shareout) return overviewScreen();
+
+  const s = G.shareout;
+  const total = Number(s.savings);
+  const toShare = Number(s.money_to_share);
+  const lent = Number(G.summary.lent);
+  const pct = (saved) => (total > 0 ? (saved / total) * 100 : 0);
+
+  // The maths for one person, step by step.
+  const steps = (row, you) => {
+    const saved = Number(row.saved);
+    const who = you ? 'You' : firstName(row.member_id);
+    if (total <= 0) {
+      return `<ol class="steps"><li>Nobody has confirmed savings yet, so there is nothing to share yet.</li></ol>`;
+    }
+    return `<ol class="steps">
+      <li>${who} saved <strong>${fmtK(saved)}</strong>. The whole group saved <strong>${fmtK(total)}</strong>.</li>
+      <li>${you ? 'Your' : esc(who) + "'s"} part of the savings is ${fmtK(saved)} ÷ ${fmtK(total)}, which is about <strong>${pct(saved).toFixed(1)}%</strong>.</li>
+      <li>The group has <strong>${fmtK(toShare)}</strong> to share.</li>
+      <li>So ${you ? 'you receive' : esc(who) + ' receives'} ${fmtK(saved)} ÷ ${fmtK(total)} × ${fmtK(toShare)} = <strong>${fmtK(row.share)}</strong>.</li>
+    </ol>`;
+  };
+
+  const mine = s.rows.find((r) => r.member_id === me.id);
+
+  // Is the cycle finished, or is this "if the share-out happened today"?
+  const ended = cycleMonth(g) > g.cycle_months;
+  const intro = ended
+    ? `The cycle ended in Month ${g.cycle_months} (${esc(monthLabel(g, g.cycle_months))}). These are the share-out amounts.`
+    : `The cycle ends in Month ${g.cycle_months} (${esc(monthLabel(g, g.cycle_months))}). These figures show what would be shared if the share-out happened today.`;
+
+  const waiting = Number(priv ? s.waiting_mine : s.waiting_all);
+  const waitBox = waiting > 0
+    ? `<div class="warnbox">${fmtK(waiting)} of ${priv ? 'your ' : ''}savings is still waiting for confirmation or disputed, so it is not counted yet.</div>` : '';
+
+  let everyone;
+  if (priv) {
+    everyone = `<section class="section">${privacyNote("Only the committee can see everyone's share-out. You can always see yours, and the group totals above, so you can check that the money to share adds up.")}</section>`;
+  } else {
+    const list = s.rows.map((r) => `
+      <details class="share">
+        <summary>
+          <span><strong>${esc(memberName(r.member_id))}</strong>${r.member_id === me.id ? ' <span class="muted">(you)</span>' : ''}
+            <span class="pct" style="display:block">Saved ${fmtK(r.saved)}, ${pct(Number(r.saved)).toFixed(1)}% of savings</span></span>
+          <span class="get">${fmtK(r.share)}<span class="open-hint" style="display:block">See the maths</span></span>
+        </summary>
+        <div class="body">${steps(r, r.member_id === me.id)}</div>
+      </details>`).join('');
+
+    // Check: do all the shares add up to the money to share?
+    const sharesTotal = Number(s.shares_total);
+    const diff = round2(Math.abs(sharesTotal - toShare));
+    const check = `Check: all shares added together come to ${fmtK(sharesTotal)}` +
+      (diff > 0 ? `, a difference of ${fmtK(diff)} from rounding to the ngwee.` : ', the same as the money to share.');
+
+    everyone = `<section class="section"><h2>Everyone's share-out</h2>
+      <p class="sub">Visible to the committee only. Tap a name to see how the amount is worked out.</p>
+      <div class="list">${list}</div>
+      <p class="meta" style="margin-top:10px">${check}</p></section>`;
+  }
+
+  return groupHead(f) + `
+  <div class="screen-head"><h2>Share-out</h2></div>
+  <p class="muted" style="margin-top:4px">${intro} Only confirmed savings and confirmed loan repayments are counted.</p>
+  ${waitBox}
+  <section class="section"><h2>Money to share</h2>
+    <ul class="calc">
+      <li><span>Confirmed savings</span><span class="v">${fmtK(s.savings)}</span></li>
+      <li><span>Plus loan interest received</span><span class="v">+ ${fmtK(s.interest)}</span></li>
+      <li><span>Plus fees and fines collected</span><span class="v">+ ${fmtK(s.fees_fines)}</span></li>
+      <li><span>Minus approved group spending</span><span class="v">− ${fmtK(s.spent)}</span></li>
+      <li class="total"><span>Money to share</span><span class="v">${fmtK(toShare)}</span></li>
+    </ul>
+    ${lent > 0 ? `<p class="hint">${fmtK(lent)} is still lent out to members. All loans must be fully repaid before the share-out.</p>`
+               : '<p class="hint">All loans must be fully repaid before the share-out.</p>'}
+  </section>
+  ${mine ? `<section class="hero"><h2>Your share-out today</h2><p class="who-big">${fmtK(mine.share)}</p>${steps(mine, true)}</section>` : ''}
+  ${everyone}`;
 }
 
 

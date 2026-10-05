@@ -1512,3 +1512,119 @@ grant execute on function public.request_payout(uuid, numeric, numeric, numeric,
 grant execute on function public.request_spending(uuid, numeric, text, numeric, numeric, numeric) to authenticated;
 grant execute on function public.request_type_change(uuid, text)                                 to authenticated;
 grant execute on function public.vote_request(uuid, text, text)                                  to authenticated;
+
+
+-- =====================================================================
+-- Phase 4: village banking share-out
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- group_interest_received: loan interest the group has received, from
+-- confirmed repayments. Loans come in Phase 5, which replaces this
+-- function with the real sum. Until then it is zero.
+-- ---------------------------------------------------------------------
+create or replace function public.group_interest_received(gid uuid)
+returns numeric
+language sql stable security definer set search_path = ''
+as $$
+  select 0::numeric;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- shareout: "if the share-out happened today" (CLAUDE.md section 8).
+--
+--   Money to share = confirmed savings
+--                  + confirmed loan interest received
+--                  + fees and fines
+--                  - approved group spending
+--   A member's share = (their confirmed savings / total confirmed
+--                       savings) x money to share, rounded to the ngwee.
+--
+-- Only confirmed savings count. Payments replaced by a correction
+-- don't count.
+--
+-- Privacy (CLAUDE.md section 7): every member gets the group totals, so
+-- they can check the numbers add up. The committee gets everyone's
+-- share; an ordinary member gets only their own.
+-- ---------------------------------------------------------------------
+create or replace function public.shareout(gid uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  v_group     public.groups;
+  v_me        public.group_members;
+  v_savings   numeric;
+  v_interest  numeric;
+  v_fees      numeric;
+  v_spent     numeric;
+  v_to_share  numeric;
+  v_rows      jsonb;
+  v_total_rnd numeric;
+begin
+  select * into v_me from public.group_members where group_id = gid and user_id = auth.uid();
+  if not found then
+    raise exception 'You are not a member of this group.';
+  end if;
+  select * into v_group from public.groups where id = gid;
+  if v_group.type <> 'village' then
+    raise exception 'The share-out is only for village banking groups.';
+  end if;
+
+  -- The four parts of "money to share"
+  select coalesce(sum(amount), 0) into v_savings
+  from public.active_payments(gid) where kind = 'saving' and status = 'confirmed';
+
+  select coalesce(sum(amount), 0) into v_fees
+  from public.active_payments(gid) where kind in ('fee', 'fine') and status = 'confirmed';
+
+  v_interest := public.group_interest_received(gid);
+
+  select coalesce(sum(amount), 0) into v_spent
+  from public.requests where group_id = gid and kind = 'spending' and status = 'approved';
+
+  v_to_share := v_savings + v_interest + v_fees - v_spent;
+
+  -- Every member's savings and share
+  with saved as (
+    select m.id, m.full_name,
+           coalesce((select sum(p.amount) from public.active_payments(gid) p
+                     where p.member_id = m.id and p.kind = 'saving' and p.status = 'confirmed'), 0) as saved
+    from public.group_members m
+    where m.group_id = gid
+  ),
+  shares as (
+    select id, full_name, saved,
+           case when v_savings > 0 then round(saved / v_savings * v_to_share, 2) else 0 end as share
+    from saved
+  )
+  select
+    -- The check uses everyone's share, even when only one row is returned.
+    (select coalesce(sum(share), 0) from shares),
+    coalesce(jsonb_agg(jsonb_build_object('member_id', id, 'saved', saved, 'share', share)
+                       order by saved desc, full_name)
+             filter (where v_me.role <> 'member' or id = v_me.id), '[]'::jsonb)
+  into v_total_rnd, v_rows
+  from shares;
+
+  return jsonb_build_object(
+    'savings',        v_savings,
+    'interest',       v_interest,
+    'fees_fines',     v_fees,
+    'spent',          v_spent,
+    'money_to_share', v_to_share,
+    'shares_total',   v_total_rnd,
+    -- Savings not counted yet (waiting for the member or disputed)
+    'waiting_all',    (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                       where kind = 'saving' and status <> 'confirmed'),
+    'waiting_mine',   (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                       where kind = 'saving' and status <> 'confirmed' and member_id = v_me.id),
+    'rows',           v_rows
+  );
+end;
+$$;
+
+revoke execute on function public.group_interest_received(uuid) from public, anon, authenticated;
+revoke execute on function public.shareout(uuid) from public, anon;
+grant  execute on function public.shareout(uuid) to authenticated;
