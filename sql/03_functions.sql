@@ -88,6 +88,21 @@ begin
 
   clean_ref := upper(regexp_replace(raw_ref, '\s', '', 'g'));
 
+  -- A correction may keep the reference of the entry it corrects (same
+  -- mobile money message, but the amount was typed wrongly).
+  -- (to_jsonb is used because some tables have no corrects_id column.)
+  if to_jsonb(new) ->> 'corrects_id' is not null then
+    declare
+      original_ref text;
+    begin
+      execute format('select reference from public.%I where id = $1', tg_table_name)
+        into original_ref using (to_jsonb(new) ->> 'corrects_id')::uuid;
+      if upper(regexp_replace(coalesce(original_ref, ''), '\s', '', 'g')) = clean_ref then
+        return new;
+      end if;
+    end;
+  end if;
+
   begin
     insert into public.money_references (reference, group_id, used_in)
     values (clean_ref, new.group_id, tg_table_name);
@@ -512,3 +527,549 @@ grant  execute on function public.create_group(jsonb, jsonb) to authenticated;
 grant  execute on function public.invite_preview(text)       to authenticated;
 grant  execute on function public.join_group(text, uuid)     to authenticated;
 grant  execute on function public.my_groups()                to authenticated;
+
+
+-- =====================================================================
+-- Phase 2: payments, confirmations, corrections, bank deposits
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- More helpers for plain-words history
+-- ---------------------------------------------------------------------
+
+-- 'airtel' -> 'Airtel Money'
+create or replace function public.method_label(method text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case method
+    when 'airtel' then 'Airtel Money'
+    when 'mtn'    then 'MTN MoMo'
+    when 'zamtel' then 'Zamtel Kwacha'
+    when 'cash'   then 'Cash'
+    when 'bank'   then 'Bank'
+    else method end;
+$$;
+
+-- Month 4 of a cycle starting 1 Oct 2026 -> 'Month 4 (January 2027)'
+create or replace function public.month_label(p_start date, p_month integer)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select 'Month ' || p_month || ' (' ||
+         to_char(p_start + make_interval(months => p_month - 1), 'FMMonth YYYY') || ')';
+$$;
+
+-- Today's date in Zambia (the database clock runs on world time, UTC).
+create or replace function public.today_zm()
+returns date
+language sql stable set search_path = ''
+as $$
+  select (now() at time zone 'Africa/Lusaka')::date;
+$$;
+
+-- Which month of the cycle is it today? Month 1 is the start month.
+create or replace function public.cycle_month(p_start date)
+returns integer
+language sql stable set search_path = ''
+as $$
+  select ((extract(year from public.today_zm()) - extract(year from p_start)) * 12
+          + extract(month from public.today_zm()) - extract(month from p_start) + 1)::integer;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- write_history: add one line to the history log. The "actor" is the
+-- logged-in person, shown with the name they have in this group.
+-- Only other database functions use this. The app can't call it, so
+-- nobody can write fake history.
+-- ---------------------------------------------------------------------
+create or replace function public.write_history(p_group_id uuid, p_action text, p_subject uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  insert into public.history (group_id, actor_user, actor_name, action, subject_member)
+  values (
+    p_group_id,
+    auth.uid(),
+    coalesce((select full_name from public.group_members
+              where group_id = p_group_id and user_id = auth.uid()), 'Usambazi (automatic)'),
+    p_action,
+    p_subject
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- active_payments: a group's payments that count, which means every
+-- payment except those replaced by a correction.
+-- ---------------------------------------------------------------------
+create or replace function public.active_payments(gid uuid)
+returns setof public.payments
+language sql stable security definer set search_path = ''
+as $$
+  select p.* from public.payments p
+  where p.group_id = gid
+    and not exists (select 1 from public.payments c where c.corrects_id = p.id);
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- group_holdings: where the group's money is right now.
+--   Payments go to the place they were paid into (mobile money, cash or
+--   the bank). Waiting and disputed payments count too, because the
+--   money has been handed over. Bank deposits move money from mobile
+--   money or cash into the bank.
+-- Later phases add payouts, spending and loans here.
+-- ---------------------------------------------------------------------
+create or replace function public.group_holdings(gid uuid)
+returns table (bank numeric, momo numeric, cash numeric)
+language sql stable security definer set search_path = ''
+as $$
+  with moves as (
+    select case when method in ('airtel', 'mtn', 'zamtel') then 'momo' else method end as place, amount
+    from public.active_payments(gid)
+    union all
+    select 'bank', amount from public.bank_deposits where group_id = gid
+    union all
+    select from_place, -amount from public.bank_deposits where group_id = gid
+  )
+  select coalesce(sum(amount) filter (where place = 'bank'), 0),
+         coalesce(sum(amount) filter (where place = 'momo'), 0),
+         coalesce(sum(amount) filter (where place = 'cash'), 0)
+  from moves;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- group_summary: the group totals every member may see, even in village
+-- banking where ordinary members can't see other people's payments
+-- (CLAUDE.md section 7): where the money is, confirmed savings, this
+-- month's progress, and who has paid this month (status only, no amounts).
+-- ---------------------------------------------------------------------
+create or replace function public.group_summary(gid uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  v_group  public.groups;
+  v_month  integer;
+  v_hold   record;
+begin
+  if not public.is_group_member(gid) then
+    raise exception 'You are not a member of this group.';
+  end if;
+  select * into v_group from public.groups where id = gid;
+
+  -- This month of the cycle, kept between month 1 and the last month.
+  v_month := greatest(1, least(public.cycle_month(v_group.start_month), v_group.cycle_months));
+  select * into v_hold from public.group_holdings(gid);
+
+  return jsonb_build_object(
+    'bank', v_hold.bank,
+    'momo', v_hold.momo,
+    'cash', v_hold.cash,
+    'lent', 0,   -- loans come in Phase 5
+    'month', v_month,
+    'confirmed_savings', (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                          where kind = 'saving' and status = 'confirmed'),
+    'waiting_savings',   (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                          where kind = 'saving' and status <> 'confirmed'),
+    'fees_fines',        (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                          where kind in ('fee', 'fine') and status = 'confirmed'),
+    'month_confirmed',   (select coalesce(sum(amount), 0) from public.active_payments(gid)
+                          where kind = 'saving' and status = 'confirmed' and cycle_month = v_month),
+    -- { member id: 'notpaid' | 'waiting' | 'disputed' | 'confirmed' } for this month
+    'statuses', (
+      select coalesce(jsonb_object_agg(m.id::text,
+               case when s.total = 0     then 'notpaid'
+                    when s.disputed > 0  then 'disputed'
+                    when s.waiting > 0   then 'waiting'
+                    else 'confirmed' end), '{}'::jsonb)
+      from public.group_members m
+      cross join lateral (
+        select count(*) as total,
+               count(*) filter (where p.status = 'disputed') as disputed,
+               count(*) filter (where p.status = 'waiting')  as waiting
+        from public.active_payments(gid) p
+        where p.member_id = m.id and p.kind = 'saving' and p.cycle_month = v_month
+      ) s
+      where m.group_id = gid)
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- record_payment: the treasurer records money a member paid in.
+-- The member is then asked to confirm it.
+-- ---------------------------------------------------------------------
+create or replace function public.record_payment(
+  p_group_id    uuid,
+  p_member_id   uuid,
+  p_kind        text,      -- 'saving', or in village banking also 'fee' or 'fine'
+  p_amount      numeric,
+  p_cycle_month integer,
+  p_paid_on     date,
+  p_method      text,      -- 'airtel', 'mtn', 'zamtel', 'cash' or 'bank'
+  p_reference   text,
+  p_note        text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_group   public.groups;
+  v_member  public.group_members;
+  v_amount  numeric := round(p_amount, 2);
+  v_ref     text    := nullif(trim(coalesce(p_reference, '')), '');
+  v_already numeric;
+  v_id      uuid;
+begin
+  select * into v_group from public.groups where id = p_group_id;
+  if not found or not public.has_role(p_group_id, 'treasurer') then
+    raise exception 'Only the treasurer can record payments.';
+  end if;
+
+  select * into v_member from public.group_members where id = p_member_id and group_id = p_group_id;
+  if not found then
+    raise exception 'Choose who paid.';
+  end if;
+
+  if coalesce(p_kind, '') not in ('saving', 'fee', 'fine') then
+    raise exception 'Choose what the payment is for.';
+  end if;
+  if v_group.type = 'chilimba' and p_kind <> 'saving' then
+    raise exception 'In a chilimba, only the monthly payment is recorded.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the amount paid, for example 500.';
+  end if;
+  if p_cycle_month is null or p_cycle_month not between 1 and v_group.cycle_months then
+    raise exception 'Choose a month between 1 and %.', v_group.cycle_months;
+  end if;
+  if p_paid_on is null then
+    raise exception 'Choose the date the money was paid.';
+  end if;
+  if p_paid_on > public.today_zm() then
+    raise exception 'The date paid cannot be in the future.';
+  end if;
+
+  if coalesce(p_method, '') not in ('airtel', 'mtn', 'zamtel', 'cash', 'bank') then
+    raise exception 'Choose how they paid.';
+  end if;
+  if p_method in ('airtel', 'mtn', 'zamtel') and length(coalesce(v_ref, '')) < 6 then
+    raise exception 'Enter the transaction reference from the mobile money message. It lets anyone trace the payment.';
+  end if;
+  if p_method = 'cash' then
+    v_ref := null;   -- cash has no reference; the treasurer writes a receipt instead
+  end if;
+
+  -- Chilimba: nobody pays more than the fixed amount for one month.
+  if v_group.type = 'chilimba' then
+    select coalesce(sum(amount), 0) into v_already
+    from public.active_payments(p_group_id)
+    where member_id = p_member_id and cycle_month = p_cycle_month and kind = 'saving';
+
+    if v_already + v_amount > v_group.monthly_amount then
+      raise exception '% already has % recorded for Month %. Everyone pays % a month. If an entry is wrong, fix it with a correction instead.',
+        v_member.full_name, public.fmt_k(v_already), p_cycle_month, public.fmt_k(v_group.monthly_amount);
+    end if;
+  end if;
+
+  -- Save it. Triggers then check the reference is new and write the history.
+  insert into public.payments (group_id, member_id, kind, amount, cycle_month, paid_on,
+                               method, reference, note, recorded_by)
+  values (p_group_id, p_member_id, p_kind, v_amount, p_cycle_month, p_paid_on,
+          p_method, v_ref, nullif(trim(coalesce(p_note, '')), ''), auth.uid())
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- answer_payment: the member who paid says "Yes, I paid this"
+-- ('confirmed') or "This is wrong" ('disputed', with a reason).
+-- Only that member can answer, and only while it is waiting.
+-- ---------------------------------------------------------------------
+create or replace function public.answer_payment(p_payment_id uuid, p_answer text, p_reason text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_payment public.payments;
+  v_reason  text := nullif(trim(coalesce(p_reason, '')), '');
+begin
+  select * into v_payment from public.payments where id = p_payment_id;
+  if not found or not exists (select 1 from public.group_members
+                              where id = v_payment.member_id and user_id = auth.uid()) then
+    raise exception 'Only the member who paid can confirm or dispute this payment.';
+  end if;
+  if exists (select 1 from public.payments where corrects_id = p_payment_id) then
+    raise exception 'This payment was replaced by a correction. Answer the correction instead.';
+  end if;
+  if v_payment.status <> 'waiting' then
+    raise exception 'You have already answered for this payment.';
+  end if;
+  if p_answer not in ('confirmed', 'disputed') then
+    raise exception 'Choose "Yes, I paid this" or "This is wrong".';
+  end if;
+  if p_answer = 'disputed' and length(coalesce(v_reason, '')) < 5 then
+    raise exception 'Please explain what is wrong in a few words.';
+  end if;
+
+  update public.payments
+  set status = p_answer,
+      dispute_reason = case when p_answer = 'disputed' then v_reason end,
+      answered_at = now()
+  where id = p_payment_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- correct_payment: the treasurer fixes a mistake. The original stays
+-- visible ("Replaced by a correction") and a new entry is added, which
+-- the member must confirm. Only the corrected entry counts in totals.
+-- ---------------------------------------------------------------------
+create or replace function public.correct_payment(
+  p_original_id uuid,
+  p_amount      numeric,
+  p_method      text,
+  p_reference   text,
+  p_reason      text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_orig    public.payments;
+  v_group   public.groups;
+  v_amount  numeric := round(p_amount, 2);
+  v_ref     text    := nullif(trim(coalesce(p_reference, '')), '');
+  v_reason  text    := nullif(trim(coalesce(p_reason, '')), '');
+  v_others  numeric;
+  v_id      uuid;
+begin
+  select * into v_orig from public.payments where id = p_original_id;
+  if not found or not public.has_role(v_orig.group_id, 'treasurer') then
+    raise exception 'Only the treasurer can add corrections.';
+  end if;
+  select * into v_group from public.groups where id = v_orig.group_id;
+
+  if exists (select 1 from public.payments where corrects_id = p_original_id) then
+    raise exception 'This payment has already been corrected. Correct the newest entry instead.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the correct amount.';
+  end if;
+  if coalesce(p_method, '') not in ('airtel', 'mtn', 'zamtel', 'cash', 'bank') then
+    raise exception 'Choose how they paid.';
+  end if;
+  if p_method in ('airtel', 'mtn', 'zamtel') and length(coalesce(v_ref, '')) < 6 then
+    raise exception 'Enter the transaction reference from the mobile money message.';
+  end if;
+  if p_method = 'cash' then
+    v_ref := null;
+  end if;
+  if length(coalesce(v_reason, '')) < 5 then
+    raise exception 'Explain why you are making this correction. The committee will read it.';
+  end if;
+
+  -- Chilimba: the corrected amount plus any other entries for that
+  -- month still can't be more than the fixed amount.
+  if v_group.type = 'chilimba' then
+    select coalesce(sum(amount), 0) into v_others
+    from public.active_payments(v_orig.group_id)
+    where member_id = v_orig.member_id and cycle_month = v_orig.cycle_month
+      and kind = 'saving' and id <> v_orig.id;
+    if v_others + v_amount > v_group.monthly_amount then
+      raise exception 'That would make % for Month %, but everyone pays % a month.',
+        public.fmt_k(v_others + v_amount), v_orig.cycle_month, public.fmt_k(v_group.monthly_amount);
+    end if;
+  end if;
+
+  insert into public.payments (group_id, member_id, kind, amount, cycle_month, paid_on,
+                               method, reference, note, recorded_by, corrects_id, correction_reason)
+  values (v_orig.group_id, v_orig.member_id, v_orig.kind, v_amount, v_orig.cycle_month, v_orig.paid_on,
+          p_method, v_ref, v_orig.note, auth.uid(), v_orig.id, v_reason)
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- record_deposit: the treasurer moves money from mobile money or cash
+-- into the group bank account. This makes money safer, so it needs no
+-- approval, but it needs a deposit reference and is logged.
+-- ---------------------------------------------------------------------
+create or replace function public.record_deposit(
+  p_group_id   uuid,
+  p_from_place text,      -- 'momo' or 'cash'
+  p_amount     numeric,
+  p_reference  text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_amount numeric := round(p_amount, 2);
+  v_ref    text    := nullif(trim(coalesce(p_reference, '')), '');
+  v_hold   record;
+  v_have   numeric;
+  v_id     uuid;
+begin
+  if not public.has_role(p_group_id, 'treasurer') then
+    raise exception 'Only the treasurer can record money moved to the bank.';
+  end if;
+  if coalesce(p_from_place, '') not in ('momo', 'cash') then
+    raise exception 'Choose where the money is moved from.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the amount moved.';
+  end if;
+  if length(coalesce(v_ref, '')) < 3 then
+    raise exception 'Enter the deposit slip or transaction number so the committee can check it.';
+  end if;
+
+  select * into v_hold from public.group_holdings(p_group_id);
+  v_have := case when p_from_place = 'momo' then v_hold.momo else v_hold.cash end;
+  if v_amount > v_have then
+    raise exception 'Only % is held as %.', public.fmt_k(v_have),
+      case when p_from_place = 'momo' then 'mobile money' else 'cash' end;
+  end if;
+
+  insert into public.bank_deposits (group_id, from_place, amount, reference, deposited_on, recorded_by)
+  values (p_group_id, p_from_place, v_amount, v_ref, public.today_zm(), auth.uid())
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- protect_answered_record: payments can never be edited. The only
+-- change ever allowed is the member's answer (status, reason, time),
+-- and only while the payment is still waiting. This applies to
+-- everyone, even someone using the Supabase website's Table Editor.
+-- ---------------------------------------------------------------------
+create or replace function public.protect_answered_record()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if (to_jsonb(new) - 'status' - 'dispute_reason' - 'answered_at')
+     is distinct from (to_jsonb(old) - 'status' - 'dispute_reason' - 'answered_at') then
+    raise exception 'Records can never be changed. Add a correction instead.';
+  end if;
+  if old.status <> 'waiting' then
+    raise exception 'This has already been confirmed or disputed, so it can''t be changed.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_payment on public.payments;
+create trigger protect_payment
+  before update on public.payments
+  for each row execute function public.protect_answered_record();
+
+
+-- ---------------------------------------------------------------------
+-- History, written automatically by triggers, so nothing can be skipped.
+-- ---------------------------------------------------------------------
+create or replace function public.payments_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_start date;
+  v_name  text;
+  v_orig  public.payments;
+  v_what  text;
+begin
+  select start_month into v_start from public.groups where id = new.group_id;
+  select full_name into v_name from public.group_members where id = new.member_id;
+
+  if tg_op = 'INSERT' and new.corrects_id is null then
+    v_what := case new.kind when 'fee' then 'a fee of ' when 'fine' then 'a fine of ' else '' end;
+    perform public.write_history(new.group_id,
+      format('Recorded %s%s from %s for %s. Paid by %s%s.',
+             v_what, public.fmt_k(new.amount), v_name, public.month_label(v_start, new.cycle_month),
+             public.method_label(new.method),
+             case when new.reference is not null then ', reference ' || new.reference else '' end),
+      new.member_id);
+
+  elsif tg_op = 'INSERT' then
+    select * into v_orig from public.payments where id = new.corrects_id;
+    perform public.write_history(new.group_id,
+      format('Added a correction to %s''s Month %s payment: %s changed to %s. Reason: "%s". The original entry is kept.',
+             v_name, new.cycle_month, public.fmt_k(v_orig.amount), public.fmt_k(new.amount), new.correction_reason),
+      new.member_id);
+
+  elsif new.status = 'confirmed' and old.status <> 'confirmed' then
+    perform public.write_history(new.group_id,
+      format('Confirmed that the %s payment for Month %s is correct.', public.fmt_k(new.amount), new.cycle_month),
+      new.member_id);
+
+  elsif new.status = 'disputed' and old.status <> 'disputed' then
+    perform public.write_history(new.group_id,
+      format('Said the %s payment recorded for Month %s is wrong: "%s"', public.fmt_k(new.amount), new.cycle_month, new.dispute_reason),
+      new.member_id);
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_history on public.payments;
+create trigger payments_history
+  after insert or update of status on public.payments
+  for each row execute function public.payments_history();
+
+
+create or replace function public.deposits_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.write_history(new.group_id,
+    format('Moved %s from %s to the group bank account. Deposit reference: %s.',
+           public.fmt_k(new.amount),
+           case when new.from_place = 'momo' then 'mobile money' else 'cash' end,
+           new.reference),
+    null);
+  return new;
+end;
+$$;
+
+drop trigger if exists deposits_history on public.bank_deposits;
+create trigger deposits_history
+  after insert on public.bank_deposits
+  for each row execute function public.deposits_history();
+
+
+-- ---------------------------------------------------------------------
+-- Who may use the Phase 2 functions.
+-- Inside helpers are closed to the app: nobody can call write_history
+-- to write fake entries, or look at another group's totals.
+-- ---------------------------------------------------------------------
+revoke execute on function public.write_history(uuid, text, uuid) from public, anon, authenticated;
+revoke execute on function public.active_payments(uuid)           from public, anon, authenticated;
+revoke execute on function public.group_holdings(uuid)            from public, anon, authenticated;
+
+revoke execute on function public.group_summary(uuid) from public, anon;
+revoke execute on function public.record_payment(uuid, uuid, text, numeric, integer, date, text, text, text) from public, anon;
+revoke execute on function public.answer_payment(uuid, text, text) from public, anon;
+revoke execute on function public.correct_payment(uuid, numeric, text, text, text) from public, anon;
+revoke execute on function public.record_deposit(uuid, text, numeric, text) from public, anon;
+
+grant execute on function public.group_summary(uuid) to authenticated;
+grant execute on function public.record_payment(uuid, uuid, text, numeric, integer, date, text, text, text) to authenticated;
+grant execute on function public.answer_payment(uuid, text, text) to authenticated;
+grant execute on function public.correct_payment(uuid, numeric, text, text, text) to authenticated;
+grant execute on function public.record_deposit(uuid, text, numeric, text) to authenticated;

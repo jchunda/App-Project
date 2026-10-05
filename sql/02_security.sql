@@ -90,6 +90,17 @@ as $$
   );
 $$;
 
+-- Does the logged-in person have this role in this group? e.g. 'treasurer'
+create or replace function public.has_role(gid uuid, wanted text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.group_members
+    where group_id = gid and user_id = auth.uid() and role = wanted
+  );
+$$;
+
 -- May the logged-in person see something about this member's money?
 -- (Privacy rules, CLAUDE.md section 7.)
 --   Yes if it is group-wide (no subject), or the group is a chilimba,
@@ -138,3 +149,35 @@ create policy "Members see group history" on public.history
   for select to authenticated
   using (public.is_group_member(group_id)
          and public.can_see_subject(group_id, subject_member));
+
+
+-- =====================================================================
+-- Phase 2: payments and bank deposits
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- payments: in a chilimba, every member sees every payment. In village
+-- banking, ordinary members see only their own; the committee sees all.
+-- (can_see_subject, above, makes that choice.)
+--
+-- There are NO insert, update or delete rules. Payments are added only
+-- through record_payment and correct_payment, and a member answers only
+-- through answer_payment (03_functions.sql). Those functions check who
+-- you are and what you are allowed to do, so the records can't be
+-- changed any other way.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see allowed payments" on public.payments;
+create policy "Members see allowed payments" on public.payments
+  for select to authenticated
+  using (public.is_group_member(group_id)
+         and public.can_see_subject(group_id, member_id));
+
+
+-- ---------------------------------------------------------------------
+-- bank_deposits: money moved into the group bank account is group-wide
+-- information, so every member sees it. Added only via record_deposit.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see bank deposits" on public.bank_deposits;
+create policy "Members see bank deposits" on public.bank_deposits
+  for select to authenticated
+  using (public.is_group_member(group_id));

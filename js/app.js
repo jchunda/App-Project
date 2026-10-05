@@ -10,12 +10,24 @@
 const S = {
   user: null,        // the logged-in person (from Supabase), or null
   profile: null,     // their name and phone (profiles table)
-  screen: 'loading', // 'login', 'home', 'create', 'join' or 'group'
+  screen: 'loading', // 'login', 'home', 'create', 'join', or a group screen (see GROUP_SCREENS)
   authTab: 'login',  // on the login screen: 'login' or 'signup'
   groups: [],        // "My groups" list (from my_groups)
-  group: null,       // the open group: { info, members, history }
+  group: null,       // the open group: { info, members, history, payments, deposits, summary }
   draft: null,       // the "Create a group" form while you fill it in
-  join: null         // the "Join a group" form: { code, preview }
+  join: null,        // the "Join a group" form: { code, preview }
+  payTab: 'mine',    // Payments screen: 'mine' or 'all'
+  payMonth: 'all'    // Payments screen: which month to show under "All payments"
+};
+
+// Screens inside a group, and the function that draws each one (js/screens.js).
+const GROUP_SCREENS = {
+  overview: () => overviewScreen(),
+  payments: () => paymentsScreen(),
+  record:   () => recordScreen(),
+  members:  () => membersScreen(),
+  history:  () => historyScreen(),
+  move:     () => moveScreen()
 };
 
 
@@ -33,16 +45,24 @@ const app = document.getElementById('app');
 // Draw the current screen. keepScroll = stay at the same place on the page.
 function render(keepScroll) {
   const y = window.scrollY;
+
+  // Inside a group: the group menu plus the screen.
+  if (S.group && GROUP_SCREENS[S.screen]) {
+    app.innerHTML = topbar() + '<div class="layout has-nav">' + groupNav(groupFacts()) +
+      '<main class="content" id="main" tabindex="-1">' + GROUP_SCREENS[S.screen]() + '</main></div>';
+    window.scrollTo(0, keepScroll ? y : 0);
+    return;
+  }
+
   let html;
   switch (S.screen) {
     case 'login':  html = loginScreen(); break;
     case 'home':   html = homeScreen(); break;
     case 'create': html = createScreen(); break;
     case 'join':   html = joinScreen(); break;
-    case 'group':  html = groupScreen(); break;
     default:       html = '<p class="muted">Loading…</p>';
   }
-  app.innerHTML = topbar() + '<main class="content" id="main" tabindex="-1">' + html + '</main>';
+  app.innerHTML = topbar() + '<div class="layout"><main class="content" id="main" tabindex="-1">' + html + '</main></div>';
   window.scrollTo(0, keepScroll ? y : 0);
 }
 
@@ -70,16 +90,33 @@ async function openHome() {
   go('home');
 }
 
-async function openGroup(groupId) {
-  const [g, m, h] = await Promise.all([
+// Load everything about one group. The security rules decide what comes
+// back: in village banking, ordinary members only get their own payments.
+async function loadGroup(groupId) {
+  const [g, m, h, p, d, s] = await Promise.all([
     db.from('groups').select('*').eq('id', groupId).single(),
     db.from('group_members').select('*').eq('group_id', groupId),
-    db.from('history').select('*').eq('group_id', groupId).order('created_at', { ascending: false }).limit(100)
+    db.from('history').select('*').eq('group_id', groupId).order('created_at', { ascending: false }).limit(200),
+    db.from('payments').select('*').eq('group_id', groupId),
+    db.from('bank_deposits').select('*').eq('group_id', groupId),
+    db.rpc('group_summary', { gid: groupId })
   ]);
-  const error = g.error || m.error || h.error;
-  if (error) { toast(friendlyError(error)); return; }
-  S.group = { info: g.data, members: m.data, history: h.data };
-  go('group');
+  const error = g.error || m.error || h.error || p.error || d.error || s.error;
+  if (error) { toast(friendlyError(error)); return false; }
+  S.group = { info: g.data, members: m.data, history: h.data, payments: p.data, deposits: d.data, summary: s.data };
+  return true;
+}
+
+async function openGroup(groupId, screen) {
+  if (!(await loadGroup(groupId))) return;
+  S.payTab = 'mine';
+  S.payMonth = 'all';
+  go(screen || 'overview');
+}
+
+// After a change: load the group again and stay on the screen you are on.
+async function refreshGroup() {
+  if (S.group && (await loadGroup(S.group.info.id))) render(true);
 }
 
 
@@ -232,7 +269,7 @@ async function saveGroup(button) {
 
   if (error) { showErrors('cg-errors', [friendlyError(error)]); return; }
   S.draft = null;
-  await openGroup(groupId);
+  await openGroup(groupId, 'members');
   toast(d.name.trim() + ' is ready. Share the invite code with your members.');
 }
 
@@ -265,6 +302,157 @@ async function joinGroup(button) {
   S.join = null;
   await openGroup(groupId);
   toast('Welcome to ' + name + '.');
+}
+
+
+/* ---------- Payments ---------- */
+
+// Show or hide the reference box to suit the payment method.
+function updateRefField(prefix, methodId) {
+  const m = method(methodId);
+  const wrap = document.getElementById(prefix + '-refwrap');
+  if (!wrap) return;
+  wrap.hidden = m.id === 'cash';
+  document.getElementById(prefix + '-cashhint').hidden = m.id !== 'cash';
+  document.getElementById(prefix + '-reflabel').textContent = m.needsRef ? 'Transaction reference' : 'Deposit slip number (optional)';
+  document.getElementById(prefix + '-refhint').textContent = m.hint;
+}
+
+// Is this reference already used in a payment I can see? (The database checks
+// every payment in every group; this check just gives a quicker message.)
+const tidyRef = (r) => String(r || '').toUpperCase().replace(/\s+/g, '');
+const refSeen = (ref, exceptId) => S.group.payments.some((p) => p.id !== exceptId && tidyRef(p.reference) === tidyRef(ref));
+
+async function savePayment(button) {
+  const f = groupFacts();
+  const memberId = val('f-member');
+  const kind = radioVal('f-kind') || 'saving';
+  const amount = parseFloat(val('f-amount'));
+  const month = Number(val('f-month'));
+  const paidOn = val('f-date');
+  const methodId = radioVal('f-method');
+  const ref = val('f-ref').trim();
+  const note = val('f-note').trim();
+  const m = methodId ? method(methodId) : null;
+
+  const errs = [];
+  markField('f-member', !memberId); if (!memberId) errs.push('Choose who paid.');
+  markField('f-amount', !(amount > 0)); if (!(amount > 0)) errs.push('Enter the amount paid, for example 500.');
+  if (!paidOn) errs.push('Choose the date the money was paid.');
+  else if (paidOn > toDayText(new Date())) errs.push('The date paid cannot be in the future.');
+  if (!m) errs.push('Choose how they paid.');
+  if (m && m.needsRef && ref.length < 6) {
+    markField('f-ref', true);
+    errs.push('Enter the transaction reference from the mobile money message. It lets anyone trace the payment.');
+  } else if (m && m.id !== 'cash' && ref && refSeen(ref)) {
+    markField('f-ref', true);
+    errs.push('This reference is already used for another payment. Each mobile money payment has its own reference.');
+  } else {
+    markField('f-ref', false);
+  }
+  // Chilimba: no more than the fixed amount for one member in one month.
+  if (memberId && amount > 0 && f.g.type === 'chilimba') {
+    const already = round2(f.active.filter((p) => p.member_id === memberId && p.cycle_month === month && p.kind === 'saving')
+                                   .reduce((t, p) => t + Number(p.amount), 0));
+    if (already + amount > Number(f.g.monthly_amount)) {
+      errs.push(`${memberName(memberId)} already has ${fmtK(already)} recorded for Month ${month}. ` +
+                `Everyone pays ${fmtK(f.g.monthly_amount)} a month. If an entry is wrong, fix it with a correction instead.`);
+    }
+  }
+  showErrors('rec-errors', errs);
+  if (errs.length) return;
+
+  const done = setBusy(button, 'Saving…');
+  const { error } = await db.rpc('record_payment', {
+    p_group_id: f.g.id, p_member_id: memberId, p_kind: kind, p_amount: round2(amount),
+    p_cycle_month: month, p_paid_on: paidOn, p_method: methodId,
+    p_reference: m.id === 'cash' ? null : ref, p_note: note
+  });
+  done();
+  if (error) { showErrors('rec-errors', [friendlyError(error)]); return; }
+
+  S.payTab = 'all';
+  S.payMonth = 'all';
+  S.screen = 'payments';
+  await refreshGroup();
+  window.scrollTo(0, 0);
+  toast(`Payment saved. ${firstName(memberId)} will be asked to confirm it.`);
+}
+
+async function confirmPayment(paymentId, button) {
+  const done = setBusy(button, 'Saving…');
+  const { error } = await db.rpc('answer_payment', { p_payment_id: paymentId, p_answer: 'confirmed', p_reason: null });
+  done();
+  if (error) { toast(friendlyError(error)); return; }
+  await refreshGroup();
+  toast('Thank you. The payment is confirmed.');
+}
+
+function disputePayment(paymentId) {
+  const p = S.group.payments.find((x) => x.id === paymentId);
+  openModal('What is wrong with this payment?', disputeBody(p), 'Mark as wrong', async () => {
+    const reason = val('m-reason').trim();
+    if (reason.length < 5) return 'Please explain what is wrong in a few words.';
+    const { error } = await db.rpc('answer_payment', { p_payment_id: paymentId, p_answer: 'disputed', p_reason: reason });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast('Marked as disputed. The committee can now see it.');
+  }, true);
+}
+
+function correctPayment(paymentId) {
+  const p = S.group.payments.find((x) => x.id === paymentId);
+  openModal('Fix with a correction', correctionBody(p), 'Save correction', async () => {
+    const amount = parseFloat(val('m-amount'));
+    const methodId = radioVal('m-method');
+    const ref = val('m-ref').trim();
+    const reason = val('m-reason').trim();
+    const m = methodId ? method(methodId) : null;
+    if (!(amount > 0)) return 'Enter the correct amount.';
+    if (!m) return 'Choose how they paid.';
+    if (m.needsRef && ref.length < 6) return 'Enter the transaction reference from the mobile money message.';
+    if (m.id !== 'cash' && ref && tidyRef(ref) !== tidyRef(p.reference) && refSeen(ref, p.id)) {
+      return 'This reference is already used for another payment.';
+    }
+    if (reason.length < 5) return 'Explain why you are making this correction. The committee will read it.';
+
+    const { error } = await db.rpc('correct_payment', {
+      p_original_id: paymentId, p_amount: round2(amount), p_method: methodId,
+      p_reference: m.id === 'cash' ? null : ref, p_reason: reason
+    });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast(`Correction saved. ${firstName(p.member_id)} will be asked to confirm it.`);
+  });
+}
+
+async function saveDeposit(button) {
+  const f = groupFacts();
+  const from = radioVal('mv-from');
+  const amount = parseFloat(val('mv-amount'));
+  const ref = val('mv-ref').trim();
+  const have = Number(from === 'momo' ? f.G.summary.momo : f.G.summary.cash);
+
+  const errs = [];
+  if (!(amount > 0)) { errs.push('Enter the amount moved.'); markField('mv-amount', true); }
+  else if (amount > have + 0.001) { errs.push(`Only ${fmtK(have)} is held as ${from === 'momo' ? 'mobile money' : 'cash'}.`); markField('mv-amount', true); }
+  else markField('mv-amount', false);
+  if (ref.length < 3) { errs.push('Enter the deposit slip or transaction number so the committee can check it.'); markField('mv-ref', true); }
+  else markField('mv-ref', false);
+  showErrors('mv-errors', errs);
+  if (errs.length) return;
+
+  const done = setBusy(button, 'Saving…');
+  const { error } = await db.rpc('record_deposit', {
+    p_group_id: f.g.id, p_from_place: from, p_amount: round2(amount), p_reference: ref
+  });
+  done();
+  if (error) { showErrors('mv-errors', [friendlyError(error)]); return; }
+
+  S.screen = 'overview';
+  await refreshGroup();
+  window.scrollTo(0, 0);
+  toast('Deposit recorded. The money is now shown in the group bank account.');
 }
 
 
@@ -327,6 +515,50 @@ document.addEventListener('click', async (event) => {
       await joinGroup(button);
       break;
 
+    // Group menu and links between group screens
+    case 'go':
+      if (button.dataset.tab) S.payTab = button.dataset.tab;
+      go(button.dataset.screen);
+      break;
+
+    case 'pay-tab':
+      S.payTab = button.dataset.tab;
+      render(true);
+      break;
+
+    case 'save-payment':
+      await savePayment(button);
+      break;
+
+    case 'pay-confirm':
+      await confirmPayment(button.dataset.id, button);
+      break;
+
+    case 'pay-dispute':
+      disputePayment(button.dataset.id);
+      break;
+
+    case 'pay-correct':
+      correctPayment(button.dataset.id);
+      break;
+
+    case 'save-deposit':
+      await saveDeposit(button);
+      break;
+
+    // Pop-up box
+    case 'modal-close':
+      closeModal();
+      break;
+
+    case 'modal-bg':
+      if (event.target === button) closeModal();   // only a click on the dark background
+      break;
+
+    case 'modal-save':
+      await saveModal(button);
+      break;
+
     case 'copy-code':
       try {
         await navigator.clipboard.writeText(S.group.info.invite_code);
@@ -347,9 +579,13 @@ document.addEventListener('submit', (event) => {
 
 // Choosing Chilimba or Village Banking redraws the form (the fields are different).
 document.addEventListener('change', (event) => {
-  if (event.target.name === 'cg-type' && S.draft) {
+  const t = event.target;
+  if (t.name === 'cg-type' && S.draft) {
     syncDraft();
-    S.draft.type = event.target.value;
+    S.draft.type = t.value;
     render(true);
   }
+  if (t.name === 'f-method') updateRefField('f', t.value);
+  if (t.name === 'm-method') updateRefField('m', t.value);
+  if (t.id === 'pay-month') { S.payMonth = t.value; render(true); }
 });

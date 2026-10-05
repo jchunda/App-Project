@@ -266,6 +266,13 @@ create table if not exists public.history (
 
 
 -- ---------------------------------------------------------------------
+-- Added in Phase 2. "if not exists" means running this file again is
+-- safe: columns that are already there are skipped.
+-- ---------------------------------------------------------------------
+alter table public.payments add column if not exists note text;   -- e.g. "paid at the meeting"
+
+
+-- ---------------------------------------------------------------------
 -- Indexes: these make common lookups faster (like an index in a book).
 -- ---------------------------------------------------------------------
 create index if not exists group_members_user_idx  on public.group_members (user_id);

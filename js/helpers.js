@@ -24,6 +24,22 @@ const MAX_MEMBERS = { chilimba: 20, village: 35 };
 const MIN_MEMBERS = 5;
 const MIN_COMMITTEE = 4;
 
+// Ways of paying. "place" is where the money ends up.
+const METHODS = [
+  { id: 'airtel', label: 'Airtel Money',  place: 'momo', needsRef: true,  hint: 'Copy it from the Airtel Money message, e.g. MP261003.0914.A47215' },
+  { id: 'mtn',    label: 'MTN MoMo',      place: 'momo', needsRef: true,  hint: 'Copy it from the MTN MoMo message, e.g. 4471029385' },
+  { id: 'zamtel', label: 'Zamtel Kwacha', place: 'momo', needsRef: true,  hint: 'Copy it from the Zamtel Kwacha message, e.g. ZK20481937' },
+  { id: 'cash',   label: 'Cash',          place: 'cash', needsRef: false, hint: '' },
+  { id: 'bank',   label: 'Bank',          place: 'bank', needsRef: false, hint: 'The number on the bank deposit slip (optional).' }
+];
+const method = (id) => METHODS.find((m) => m.id === id);
+
+// What a village banking payment is for.
+const KINDS = { saving: 'Saving', fee: 'Fee', fine: 'Fine' };
+
+// "Month 4 (January 2027)"
+const mLabel = (group, month) => 'Month ' + month + ' (' + monthLabel(group, month) + ')';
+
 
 /* ---------- Text and numbers ---------- */
 
@@ -89,9 +105,13 @@ function cycleText(group) {
 /* ---------- Icons (simple line drawings, same as the prototype) ---------- */
 
 const ICONS = {
-  back:   '<path d="M15 5l-7 7 7 7"/>',
-  lock:   '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.6c2 .7 3.2 2.5 3.5 5.4"/>'
+  back:    '<path d="M15 5l-7 7 7 7"/>',
+  lock:    '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  people:  '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.6c2 .7 3.2 2.5 3.5 5.4"/>',
+  home:    '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  clock:   '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  eye:     '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
 };
 const icon = (name) =>
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
@@ -102,8 +122,16 @@ const icon = (name) =>
 
 const PILLS = {
   joined:    ['ok',   '✓', 'Has joined'],
-  notjoined: ['none', '–', 'Not joined yet']
+  notjoined: ['none', '–', 'Not joined yet'],
+  confirmed: ['ok',   '✓', 'Confirmed'],
+  waiting:   ['wait', '…', 'Waiting for confirmation'],
+  disputed:  ['bad',  '!', 'Disputed'],
+  notpaid:   ['none', '–', 'Not paid yet'],
+  corrected: ['none', '↺', 'Replaced by a correction']
 };
+
+// A small note with an eye symbol, used to explain privacy rules.
+const privacyNote = (text) => '<p class="lock-note">' + icon('eye') + '<span>' + esc(text) + '</span></p>';
 function pill(kind, text) {
   const [cls, symbol, words] = PILLS[kind];
   return '<span class="pill ' + cls + '"><span aria-hidden="true">' + symbol + '</span>' +
@@ -172,3 +200,47 @@ function setBusy(button, busyText) {
   button.textContent = busyText;
   return () => { button.disabled = false; button.textContent = oldText; };
 }
+
+
+/* ---------- Pop-up box (modal) ---------- */
+// openModal shows a box over the screen with a Cancel and a Save button.
+// onSave runs when Save is pressed. It may return (or resolve to) a
+// message, which is shown in the box; otherwise the box closes.
+let modalSave = null;
+let modalLastFocus = null;
+
+function openModal(title, bodyHtml, saveLabel, onSave, danger) {
+  modalLastFocus = document.activeElement;
+  modalSave = onSave;
+  document.getElementById('modal-root').innerHTML =
+    '<div class="overlay" data-action="modal-bg"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+    '<h2 id="modal-title">' + title + '</h2>' + bodyHtml + '<div id="modal-errors"></div>' +
+    '<div class="dialog-actions"><button type="button" class="btn ghost" data-action="modal-close">Cancel</button>' +
+    '<button type="button" class="btn' + (danger ? ' danger' : '') + '" data-action="modal-save">' + saveLabel + '</button></div>' +
+    '</div></div>';
+  const first = document.querySelector('#modal-root input:not([type=radio]), #modal-root textarea, #modal-root select');
+  (first || document.querySelector('#modal-root .btn')).focus();
+}
+
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+  modalSave = null;
+  if (modalLastFocus && document.body.contains(modalLastFocus)) modalLastFocus.focus();
+}
+
+async function saveModal(button) {
+  if (!modalSave) return;
+  const done = setBusy(button, 'Saving…');
+  const problem = await modalSave();
+  done();
+  if (problem) {
+    document.getElementById('modal-errors').innerHTML = '<div class="errors" role="alert">' + esc(problem) + '</div>';
+  } else {
+    closeModal();
+  }
+}
+
+// Pressing Escape closes the box.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && modalSave) closeModal();
+});
