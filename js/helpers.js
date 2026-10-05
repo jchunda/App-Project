@@ -111,7 +111,9 @@ const ICONS = {
   home:    '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   clock:   '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  eye:     '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
+  eye:     '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  cycle:   '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
+  shield:  '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>'
 };
 const icon = (name) =>
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
@@ -127,8 +129,15 @@ const PILLS = {
   waiting:   ['wait', '…', 'Waiting for confirmation'],
   disputed:  ['bad',  '!', 'Disputed'],
   notpaid:   ['none', '–', 'Not paid yet'],
-  corrected: ['none', '↺', 'Replaced by a correction']
+  corrected: ['none', '↺', 'Replaced by a correction'],
+  pending:   ['wait', '…', 'Pending approval'],
+  approved:  ['ok',   '✓', 'Approved'],
+  rejected:  ['bad',  '✕', 'Rejected']
 };
+
+// The approval rule, in words (CLAUDE.md section 6).
+const RULE_TEXT = 'Needs a yes from 2 committee members, including the chairperson or vice chairperson. ' +
+                  'The person asking cannot vote.';
 
 // A small note with an eye symbol, used to explain privacy rules.
 const privacyNote = (text) => '<p class="lock-note">' + icon('eye') + '<span>' + esc(text) + '</span></p>';

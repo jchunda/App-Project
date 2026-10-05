@@ -181,3 +181,33 @@ drop policy if exists "Members see bank deposits" on public.bank_deposits;
 create policy "Members see bank deposits" on public.bank_deposits
   for select to authenticated
   using (public.is_group_member(group_id));
+
+
+-- =====================================================================
+-- Phase 3: requests and votes
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- requests: every member sees the group's requests (payouts, spending,
+-- type changes), so all decisions are visible. The one exception: in
+-- village banking, an ordinary member sees only their OWN loan
+-- requests (CLAUDE.md section 7).
+-- Requests are added only by the request_... functions, and decided
+-- only by vote_request, so there are no insert/update/delete rules.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see allowed requests" on public.requests;
+create policy "Members see allowed requests" on public.requests
+  for select to authenticated
+  using (public.is_group_member(group_id)
+         and public.can_see_subject(group_id, case when kind = 'loan' then requested_by end));
+
+
+-- ---------------------------------------------------------------------
+-- votes: you can see the votes on any request you are allowed to see.
+-- (The rule on requests above is applied inside this check too.)
+-- Votes are added only through vote_request.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see votes on visible requests" on public.votes;
+create policy "Members see votes on visible requests" on public.votes
+  for select to authenticated
+  using (exists (select 1 from public.requests r where r.id = request_id));

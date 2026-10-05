@@ -271,6 +271,11 @@ create table if not exists public.history (
 -- ---------------------------------------------------------------------
 alter table public.payments add column if not exists note text;   -- e.g. "paid at the meeting"
 
+-- Added in Phase 3.
+alter table public.votes  add column if not exists reason text;   -- why someone voted no (optional)
+alter table public.groups add column if not exists next_type text -- approved type change, starts next cycle
+  check (next_type in ('chilimba', 'village'));
+
 
 -- ---------------------------------------------------------------------
 -- Indexes: these make common lookups faster (like an index in a book).

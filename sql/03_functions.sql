@@ -621,8 +621,9 @@ $$;
 --   Payments go to the place they were paid into (mobile money, cash or
 --   the bank). Waiting and disputed payments count too, because the
 --   money has been handed over. Bank deposits move money from mobile
---   money or cash into the bank.
--- Later phases add payouts, spending and loans here.
+--   money or cash into the bank. Approved payouts and spending take
+--   money out of the places the treasurer chose.
+-- Phase 5 adds loans here.
 -- ---------------------------------------------------------------------
 create or replace function public.group_holdings(gid uuid)
 returns table (bank numeric, momo numeric, cash numeric)
@@ -635,11 +636,40 @@ as $$
     select 'bank', amount from public.bank_deposits where group_id = gid
     union all
     select from_place, -amount from public.bank_deposits where group_id = gid
+    union all
+    select 'bank', -from_bank from public.requests
+    where group_id = gid and status = 'approved' and kind in ('payout', 'spending')
+    union all
+    select 'momo', -from_momo from public.requests
+    where group_id = gid and status = 'approved' and kind in ('payout', 'spending')
+    union all
+    select 'cash', -from_cash from public.requests
+    where group_id = gid and status = 'approved' and kind in ('payout', 'spending')
   )
   select coalesce(sum(amount) filter (where place = 'bank'), 0),
          coalesce(sum(amount) filter (where place = 'momo'), 0),
          coalesce(sum(amount) filter (where place = 'cash'), 0)
   from moves;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- group_available: money the treasurer can still ask to use. It is
+-- what the group holds, minus money already promised in requests that
+-- are still waiting for approval. This stops the same money from being
+-- asked for twice.
+-- ---------------------------------------------------------------------
+create or replace function public.group_available(gid uuid)
+returns table (bank numeric, momo numeric, cash numeric)
+language sql stable security definer set search_path = ''
+as $$
+  select h.bank - coalesce(sum(r.from_bank), 0),
+         h.momo - coalesce(sum(r.from_momo), 0),
+         h.cash - coalesce(sum(r.from_cash), 0)
+  from public.group_holdings(gid) h
+  left join public.requests r
+    on r.group_id = gid and r.status = 'pending' and r.kind in ('payout', 'spending')
+  group by h.bank, h.momo, h.cash;
 $$;
 
 
@@ -657,6 +687,7 @@ declare
   v_group  public.groups;
   v_month  integer;
   v_hold   record;
+  v_avail  record;
 begin
   if not public.is_group_member(gid) then
     raise exception 'You are not a member of this group.';
@@ -666,12 +697,21 @@ begin
   -- This month of the cycle, kept between month 1 and the last month.
   v_month := greatest(1, least(public.cycle_month(v_group.start_month), v_group.cycle_months));
   select * into v_hold from public.group_holdings(gid);
+  select * into v_avail from public.group_available(gid);
 
   return jsonb_build_object(
     'bank', v_hold.bank,
     'momo', v_hold.momo,
     'cash', v_hold.cash,
     'lent', 0,   -- loans come in Phase 5
+    -- What can still be asked for (not promised to a waiting request)
+    'avail_bank', v_avail.bank,
+    'avail_momo', v_avail.momo,
+    'avail_cash', v_avail.cash,
+    'paid_out',   (select coalesce(sum(amount), 0) from public.requests
+                   where group_id = gid and status = 'approved' and kind = 'payout'),
+    'spent',      (select coalesce(sum(amount), 0) from public.requests
+                   where group_id = gid and status = 'approved' and kind = 'spending'),
     'month', v_month,
     'confirmed_savings', (select coalesce(sum(amount), 0) from public.active_payments(gid)
                           where kind = 'saving' and status = 'confirmed'),
@@ -935,7 +975,8 @@ begin
     raise exception 'Enter the deposit slip or transaction number so the committee can check it.';
   end if;
 
-  select * into v_hold from public.group_holdings(p_group_id);
+  -- Money promised to a waiting request stays where it is.
+  select * into v_hold from public.group_available(p_group_id);
   v_have := case when p_from_place = 'momo' then v_hold.momo else v_hold.cash end;
   if v_amount > v_have then
     raise exception 'Only % is held as %.', public.fmt_k(v_have),
@@ -1073,3 +1114,401 @@ grant execute on function public.record_payment(uuid, uuid, text, numeric, integ
 grant execute on function public.answer_payment(uuid, text, text) to authenticated;
 grant execute on function public.correct_payment(uuid, numeric, text, text, text) to authenticated;
 grant execute on function public.record_deposit(uuid, text, numeric, text) to authenticated;
+
+
+-- =====================================================================
+-- Phase 3: requests, voting, chilimba payouts, spending, type changes
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- write_auto_history: like write_history, but for things Usambazi does
+-- by itself (for example "Approved: ..." once enough people voted yes).
+-- ---------------------------------------------------------------------
+create or replace function public.write_auto_history(p_group_id uuid, p_action text, p_subject uuid)
+returns void
+language sql security definer set search_path = ''
+as $$
+  insert into public.history (group_id, actor_user, actor_name, action, subject_member)
+  values (p_group_id, null, 'Usambazi (automatic)', p_action, p_subject);
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- request_title: a request in plain words, e.g.
+-- 'Pay K4,000 to Mwila Banda (Month 4 receiver)'
+-- ---------------------------------------------------------------------
+create or replace function public.request_title(r public.requests)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select case r.kind
+    when 'payout' then format('Pay %s to %s (Month %s receiver)', public.fmt_k(r.amount),
+                              (select full_name from public.group_members where id = r.payout_to), r.cycle_month)
+    when 'spending' then format('Spend %s: %s', public.fmt_k(r.amount), r.description)
+    when 'type_change' then format('Change the group type to %s',
+                                   case when r.new_type = 'chilimba' then 'Chilimba' else 'Village Banking' end)
+    when 'loan' then format('Loan of %s to %s', public.fmt_k(r.amount),
+                            (select full_name from public.group_members where id = r.requested_by))
+    else 'Request' end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- check_sources: the parts taken from bank, mobile money and cash must
+-- add up to the amount, and no place can go below zero.
+-- ---------------------------------------------------------------------
+create or replace function public.check_sources(gid uuid, p_amount numeric,
+                                                p_bank numeric, p_momo numeric, p_cash numeric)
+returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  v_avail record;
+begin
+  if p_bank < 0 or p_momo < 0 or p_cash < 0 then
+    raise exception 'Amounts cannot be negative.';
+  end if;
+  if round(p_bank + p_momo + p_cash, 2) <> round(p_amount, 2) then
+    raise exception 'The amounts you are taking add up to %, but the request is for %. They must match.',
+      public.fmt_k(p_bank + p_momo + p_cash), public.fmt_k(p_amount);
+  end if;
+
+  select * into v_avail from public.group_available(gid);
+  if p_bank > v_avail.bank then
+    raise exception 'Only % is available in the group bank account.', public.fmt_k(v_avail.bank);
+  end if;
+  if p_momo > v_avail.momo then
+    raise exception 'Only % is available in mobile money.', public.fmt_k(v_avail.momo);
+  end if;
+  if p_cash > v_avail.cash then
+    raise exception 'Only % is available in cash.', public.fmt_k(v_avail.cash);
+  end if;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- request_payout: (chilimba, treasurer) ask to pay this month's pot to
+-- the member whose turn it is.
+-- ---------------------------------------------------------------------
+create or replace function public.request_payout(p_group_id uuid, p_amount numeric,
+                                                 p_bank numeric, p_momo numeric, p_cash numeric)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_group    public.groups;
+  v_month    integer;
+  v_receiver public.group_members;
+  v_me       uuid;
+  v_id       uuid;
+  v_amount   numeric := round(p_amount, 2);
+begin
+  select * into v_group from public.groups where id = p_group_id;
+  if not found or not public.has_role(p_group_id, 'treasurer') then
+    raise exception 'Only the treasurer can ask to pay out money.';
+  end if;
+  if v_group.type <> 'chilimba' then
+    raise exception 'Payouts in turn are only for chilimbas.';
+  end if;
+  if public.cycle_month(v_group.start_month) < 1 then
+    raise exception 'The cycle has not started yet.';
+  end if;
+
+  v_month := least(public.cycle_month(v_group.start_month), v_group.cycle_months);
+  select * into v_receiver from public.group_members
+  where group_id = p_group_id and rotation_position = v_month;
+
+  if exists (select 1 from public.requests where group_id = p_group_id and kind = 'payout'
+             and cycle_month = v_month and status <> 'rejected') then
+    raise exception 'A payout for Month % has already been asked for.', v_month;
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the amount.';
+  end if;
+  if v_amount > v_group.monthly_amount * (select count(*) from public.group_members where group_id = p_group_id) then
+    raise exception 'The payout cannot be more than the full pot.';
+  end if;
+
+  perform public.check_sources(p_group_id, v_amount, coalesce(p_bank, 0), coalesce(p_momo, 0), coalesce(p_cash, 0));
+
+  select id into v_me from public.group_members where group_id = p_group_id and user_id = auth.uid();
+  insert into public.requests (group_id, kind, requested_by, amount, payout_to, cycle_month,
+                               from_bank, from_momo, from_cash)
+  values (p_group_id, 'payout', v_me, v_amount, v_receiver.id, v_month,
+          round(coalesce(p_bank, 0), 2), round(coalesce(p_momo, 0), 2), round(coalesce(p_cash, 0), 2))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- request_spending: (treasurer) ask to spend group money on something,
+-- for example a bank charge.
+-- ---------------------------------------------------------------------
+create or replace function public.request_spending(p_group_id uuid, p_amount numeric, p_reason text,
+                                                   p_bank numeric, p_momo numeric, p_cash numeric)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_me     uuid;
+  v_id     uuid;
+  v_amount numeric := round(p_amount, 2);
+  v_reason text    := nullif(trim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_role(p_group_id, 'treasurer') then
+    raise exception 'Only the treasurer can ask to pay out money.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the amount.';
+  end if;
+  if length(coalesce(v_reason, '')) < 4 then
+    raise exception 'Give a clear reason for the spending.';
+  end if;
+
+  perform public.check_sources(p_group_id, v_amount, coalesce(p_bank, 0), coalesce(p_momo, 0), coalesce(p_cash, 0));
+
+  select id into v_me from public.group_members where group_id = p_group_id and user_id = auth.uid();
+  insert into public.requests (group_id, kind, requested_by, amount, description,
+                               from_bank, from_momo, from_cash)
+  values (p_group_id, 'spending', v_me, v_amount, v_reason,
+          round(coalesce(p_bank, 0), 2), round(coalesce(p_momo, 0), 2), round(coalesce(p_cash, 0), 2))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- request_type_change: (any member) ask to change Chilimba <-> Village
+-- Banking. If approved, it starts with the next cycle.
+-- ---------------------------------------------------------------------
+create or replace function public.request_type_change(p_group_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_group  public.groups;
+  v_me     uuid;
+  v_id     uuid;
+  v_reason text := nullif(trim(coalesce(p_reason, '')), '');
+begin
+  select * into v_group from public.groups where id = p_group_id;
+  select id into v_me from public.group_members where group_id = p_group_id and user_id = auth.uid();
+  if v_me is null then
+    raise exception 'You are not a member of this group.';
+  end if;
+  if exists (select 1 from public.requests where group_id = p_group_id
+             and kind = 'type_change' and status = 'pending') then
+    raise exception 'A request to change the type is already waiting for approval.';
+  end if;
+  if length(coalesce(v_reason, '')) < 5 then
+    raise exception 'Please give a reason. The committee will read it before voting.';
+  end if;
+
+  insert into public.requests (group_id, kind, requested_by, description, new_type)
+  values (p_group_id, 'type_change', v_me, v_reason,
+          case when coalesce(v_group.next_type, v_group.type) = 'chilimba' then 'village' else 'chilimba' end)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- vote_request: a committee member votes yes or no, then the rules from
+-- CLAUDE.md section 6 decide the request:
+--   Approved when at least 2 committee members say yes, and at least
+--     one of them is the Chairperson or Vice Chairperson.
+--   Rejected when the Chairperson says no, or more than half of the
+--     eligible committee members say no.
+--   The person who asked can't vote, and each person votes only once.
+-- The counting happens here in the database, so it can't be skipped.
+-- ---------------------------------------------------------------------
+create or replace function public.vote_request(p_request_id uuid, p_vote text, p_reason text)
+returns text   -- the request's status after the vote
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_req       public.requests;
+  v_me        public.group_members;
+  v_eligible  integer;
+  v_yes       integer;
+  v_no        integer;
+  v_lead_yes  boolean;
+  v_chair_no  boolean;
+  v_avail     record;
+begin
+  -- Lock the request, so two people voting at the same moment are counted one after the other.
+  select * into v_req from public.requests where id = p_request_id for update;
+  if not found then
+    raise exception 'This request no longer exists.';
+  end if;
+
+  select * into v_me from public.group_members
+  where group_id = v_req.group_id and user_id = auth.uid();
+  if not found or v_me.role = 'member' then
+    raise exception 'Only committee members can vote.';
+  end if;
+  if v_req.status <> 'pending' then
+    raise exception 'This request has already been decided.';
+  end if;
+  if v_me.id = v_req.requested_by then
+    raise exception 'You asked for this, so you can''t vote on it.';
+  end if;
+  if exists (select 1 from public.votes where request_id = p_request_id and member_id = v_me.id) then
+    raise exception 'You have already voted on this request.';
+  end if;
+  if p_vote not in ('yes', 'no') then
+    raise exception 'Choose Approve or Reject.';
+  end if;
+
+  insert into public.votes (request_id, member_id, vote, reason)
+  values (p_request_id, v_me.id, p_vote, nullif(trim(coalesce(p_reason, '')), ''));
+
+  -- Count the votes
+  select count(*) into v_eligible from public.group_members
+  where group_id = v_req.group_id and role <> 'member' and id <> v_req.requested_by;
+
+  select count(*) filter (where v.vote = 'yes'),
+         count(*) filter (where v.vote = 'no'),
+         coalesce(bool_or(v.vote = 'yes' and m.role in ('chair', 'vice')), false),
+         coalesce(bool_or(v.vote = 'no'  and m.role = 'chair'), false)
+  into v_yes, v_no, v_lead_yes, v_chair_no
+  from public.votes v join public.group_members m on m.id = v.member_id
+  where v.request_id = p_request_id;
+
+  if v_chair_no or v_no * 2 > v_eligible then
+    update public.requests set status = 'rejected', decided_at = now() where id = p_request_id;
+    return 'rejected';
+  end if;
+
+  if v_yes >= 2 and v_lead_yes then
+    -- Safety check: the money must still be there.
+    if v_req.kind in ('payout', 'spending') then
+      select * into v_avail from public.group_holdings(v_req.group_id);
+      if v_req.from_bank > v_avail.bank or v_req.from_momo > v_avail.momo or v_req.from_cash > v_avail.cash then
+        raise exception 'The group no longer holds enough money in the places this request takes it from. The treasurer should ask again.';
+      end if;
+    end if;
+
+    update public.requests set status = 'approved', decided_at = now() where id = p_request_id;
+
+    if v_req.kind = 'type_change' then
+      update public.groups set next_type = v_req.new_type where id = v_req.group_id;
+    end if;
+    return 'approved';
+  end if;
+
+  return 'pending';
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- protect_request: a request can never be edited. The only change
+-- allowed is its decision (pending -> approved or rejected), made by
+-- vote_request.
+-- ---------------------------------------------------------------------
+create or replace function public.protect_request()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if (to_jsonb(new) - 'status' - 'decided_at') is distinct from (to_jsonb(old) - 'status' - 'decided_at') then
+    raise exception 'Requests can never be changed.';
+  end if;
+  if old.status <> 'pending' then
+    raise exception 'This request has already been decided.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_request on public.requests;
+create trigger protect_request
+  before update on public.requests
+  for each row execute function public.protect_request();
+
+
+-- ---------------------------------------------------------------------
+-- History for requests and votes, written by triggers.
+-- A loan request's history is about the borrower (privacy rules).
+-- ---------------------------------------------------------------------
+create or replace function public.requests_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_title   text := public.request_title(new);
+  v_subject uuid := case when new.kind = 'loan' then new.requested_by end;
+begin
+  if tg_op = 'INSERT' then
+    perform public.write_history(new.group_id,
+      format('Asked for approval: %s.%s', v_title,
+             case when new.kind = 'type_change' then ' Reason: "' || new.description || '"' else '' end),
+      v_subject);
+  elsif new.status = 'approved' then
+    perform public.write_auto_history(new.group_id,
+      format('Approved: %s. %s', v_title,
+             case new.kind
+               when 'type_change' then 'It will start with the next cycle.'
+               when 'loan'        then 'The treasurer can now send the money.'
+               else 'The money is now counted as paid out.' end),
+      v_subject);
+  elsif new.status = 'rejected' then
+    perform public.write_auto_history(new.group_id,
+      format('Rejected: %s.%s', v_title, case when new.kind = 'type_change' then '' else ' No money was moved.' end),
+      v_subject);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists requests_history on public.requests;
+create trigger requests_history
+  after insert or update of status on public.requests
+  for each row execute function public.requests_history();
+
+
+create or replace function public.votes_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_req public.requests;
+begin
+  select * into v_req from public.requests where id = new.request_id;
+  perform public.write_history(v_req.group_id,
+    format('Voted %s on: %s.%s', new.vote, public.request_title(v_req),
+           case when new.reason is not null then ' Reason: "' || new.reason || '"' else '' end),
+    case when v_req.kind = 'loan' then v_req.requested_by end);
+  return new;
+end;
+$$;
+
+drop trigger if exists votes_history on public.votes;
+create trigger votes_history
+  after insert on public.votes
+  for each row execute function public.votes_history();
+
+
+-- ---------------------------------------------------------------------
+-- Who may use the Phase 3 functions.
+-- ---------------------------------------------------------------------
+revoke execute on function public.write_auto_history(uuid, text, uuid) from public, anon, authenticated;
+revoke execute on function public.group_available(uuid)                from public, anon, authenticated;
+revoke execute on function public.check_sources(uuid, numeric, numeric, numeric, numeric) from public, anon, authenticated;
+revoke execute on function public.request_title(public.requests)        from public, anon, authenticated;
+
+revoke execute on function public.request_payout(uuid, numeric, numeric, numeric, numeric)        from public, anon;
+revoke execute on function public.request_spending(uuid, numeric, text, numeric, numeric, numeric) from public, anon;
+revoke execute on function public.request_type_change(uuid, text)                                 from public, anon;
+revoke execute on function public.vote_request(uuid, text, text)                                  from public, anon;
+
+grant execute on function public.request_payout(uuid, numeric, numeric, numeric, numeric)        to authenticated;
+grant execute on function public.request_spending(uuid, numeric, text, numeric, numeric, numeric) to authenticated;
+grant execute on function public.request_type_change(uuid, text)                                 to authenticated;
+grant execute on function public.vote_request(uuid, text, text)                                  to authenticated;

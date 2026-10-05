@@ -270,6 +270,27 @@ function groupFacts() {
   };
 }
 
+// May I vote on this request? Committee only, not on my own request, only once.
+function canVote(f, r) {
+  return r.status === 'pending' && f.committee && r.requested_by !== f.me.id &&
+    !f.G.votes.some((v) => v.request_id === r.id && v.member_id === f.me.id);
+}
+
+// A request in plain words (the database writes the same words in the history).
+function requestTitle(r) {
+  if (r.kind === 'payout') return `Pay ${fmtK(r.amount)} to ${memberName(r.payout_to)} (Month ${r.cycle_month} receiver)`;
+  if (r.kind === 'spending') return `Spend ${fmtK(r.amount)}: ${r.description}`;
+  if (r.kind === 'type_change') return `Change the group type to ${TYPE[r.new_type]}`;
+  if (r.kind === 'loan') return `Loan of ${fmtK(r.amount)} to ${memberName(r.requested_by)}`;
+  return 'Request';
+}
+
+// Where the money is taken from, in words.
+function placeName(f, place) {
+  const t = f.treasurer ? f.treasurer.full_name : 'the treasurer';
+  return { bank: 'Group bank account', momo: t + "'s mobile money", cash: 'Cash kept by ' + t }[place];
+}
+
 const memberById = (id) => S.group.members.find((m) => m.id === id);
 const memberName = (id) => (memberById(id) || {}).full_name || 'Someone';
 const firstName = (id) => memberName(id).split(' ')[0];
@@ -289,13 +310,20 @@ const savedBy = (f, memberId) =>
 /* ---------- Group menu and heading ---------- */
 function groupNav(f) {
   const myWaiting = f.active.filter((p) => p.member_id === f.me.id && p.status === 'waiting').length;
-  const items = [
-    ['overview', 'Overview', 'home', 0],
-    ['payments', 'Payments', 'receipt', myWaiting],
-    ['members',  'Members',  'people', 0],
-    ['history',  'History',  'clock', 0]
-  ];
-  const parent = { record: 'payments', move: 'overview' };
+  const myVotes = f.G.requests.filter((r) => canVote(f, r)).length;
+  const items = f.g.type === 'chilimba'
+    ? [['overview', 'Overview', 'home', 0],
+       ['payments', 'Payments', 'receipt', myWaiting],
+       ['members',  'Members',  'people', 0],
+       ['turns',    'Turns',    'cycle', 0],
+       ['approvals', 'Approvals', 'shield', myVotes],
+       ['history',  'History',  'clock', 0]]
+    : [['overview', 'Overview', 'home', 0],
+       ['payments', 'Payments', 'receipt', myWaiting],
+       ['approvals', 'Approvals', 'shield', myVotes],
+       ['members',  'Members',  'people', 0],
+       ['history',  'History',  'clock', 0]];
+  const parent = { record: 'payments', move: 'overview', request: 'approvals' };
   const on = parent[S.screen] || S.screen;
   return `<nav class="nav" aria-label="Group menu" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([screen, label, ic, badge]) =>
     `<button type="button" data-action="go" data-screen="${screen}"${on === screen ? ' aria-current="page"' : ''}>${icon(ic)}<span>${label}</span>${
@@ -375,8 +403,13 @@ function overviewScreen() {
   const othersWaiting = active.filter((p) => p.status === 'waiting' && p.member_id !== me.id).length;
   const notPaid = G.members.filter((m) => statuses[m.id] === 'notpaid');
 
+  const pending = G.requests.filter((r) => r.status === 'pending');
+  const myVotes = pending.filter((r) => canVote(f, r)).length;
+
   const items = [];
   if (myWaiting) items.push(['bad', `You have ${plural(myWaiting, 'payment', 'payments')} to confirm`, 'Check it against your mobile money message.', 'payments', 'mine']);
+  if (myVotes) items.push(['bad', `${plural(myVotes, 'request needs', 'requests need')} your vote`, 'Money cannot leave the group until the committee approves it.', 'approvals']);
+  if (pending.length && !myVotes) items.push(['wait', `${plural(pending.length, 'request is', 'requests are')} waiting for committee approval`, '', 'approvals']);
   if (!priv) {
     if (disputed) items.push(['bad', `${plural(disputed, 'payment is', 'payments are')} disputed`,
       f.isT ? 'Check with the member and fix it with a correction.' : 'Everyone can see these until the treasurer adds a correction.', 'payments', 'all']);
@@ -418,9 +451,18 @@ function overviewScreen() {
       ? `<span class="meta" style="display:block">${recorded ? fmtK(recorded) + ' recorded' : 'Nothing recorded'}</span>` : ''}</span>${pill(statuses[m.id] || 'notpaid')}</div>`;
   }).join('');
 
+  const payouts = G.requests.filter((r) => r.kind === 'payout' && r.status === 'approved');
   const totals = g.type === 'chilimba'
-    ? `${fmtK(G.summary.confirmed_savings)} confirmed payments this cycle.`
+    ? `${fmtK(G.summary.paid_out)} paid out so far to ${plural(payouts.length, 'member', 'members')}.`
     : `${fmtK(G.summary.confirmed_savings)} confirmed savings so far this cycle.`;
+
+  // Group type: locked. Anyone can ask to change it; the committee decides.
+  const typePending = pending.some((r) => r.kind === 'type_change');
+  let typeAction;
+  if (typePending) typeAction = '<p class="meta" style="margin-top:6px"><strong>A request to change the type is waiting for approval.</strong></p>';
+  else typeAction = '<button type="button" class="linkbtn" data-action="ask-type">Ask to change the type</button>';
+  const nextType = g.next_type && g.next_type !== g.type
+    ? `<p class="meta" style="margin-top:6px"><strong>Approved: from the next cycle, this group will be ${TYPE[g.next_type]}.</strong></p>` : '';
 
   const committeeRows = G.members.filter((m) => m.role !== 'member')
     .sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role))
@@ -445,7 +487,8 @@ function overviewScreen() {
 
   <section class="section"><h2>Group type</h2>
     <div class="typelock">${icon('lock')}<div><strong>${TYPE[g.type]}, locked</strong>
-      <p class="meta">Changing the type changes how everyone's money is worked out, so it needs committee approval.</p></div></div>
+      <p class="meta">Changing the type changes how everyone's money is worked out, so it needs committee approval.</p>
+      ${nextType}${typeAction}</div></div>
   </section>`;
 }
 
@@ -721,4 +764,213 @@ function correctionBody(p) {
   ${refField('m', p.method, p.reference)}
   <div class="field"><label for="m-reason">Reason for the correction</label>
     <textarea id="m-reason" placeholder="For example: I typed K300 by mistake. The Airtel message shows K500."></textarea></div>`;
+}
+
+
+/* ---------- Approvals ---------- */
+function approvalsScreen() {
+  const f = groupFacts();
+  const { G, me } = f;
+
+  const sorted = G.requests.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const pending = sorted.filter((r) => r.status === 'pending');
+  const decided = sorted.filter((r) => r.status !== 'pending');
+
+  const card = (r) => {
+    const votes = G.votes.filter((v) => v.request_id === r.id)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map((v) => {
+        const voter = memberById(v.member_id) || {};
+        return v.vote === 'yes'
+          ? `<li><span class="v-yes" aria-hidden="true">✓</span><span>${esc(voter.full_name)} (${ROLE[voter.role]}) said yes, ${fmtDateTime(new Date(v.created_at))}</span></li>`
+          : `<li><span class="v-no" aria-hidden="true">✕</span><span>${esc(voter.full_name)} (${ROLE[voter.role]}) said no${v.reason ? ': "' + esc(v.reason) + '"' : ''}</span></li>`;
+      }).join('');
+
+    const sources = ['bank', 'momo', 'cash']
+      .filter((k) => Number(r['from_' + k]) > 0)
+      .map((k) => `${fmtK(r['from_' + k])} from ${placeName(f, k).toLowerCase()}`).join(', ');
+
+    let actions = '';
+    if (canVote(f, r)) {
+      actions = `<div class="actions">
+        <button type="button" class="btn small" data-action="vote-yes" data-id="${r.id}">Approve</button>
+        <button type="button" class="btn small danger-ghost" data-action="vote-no" data-id="${r.id}">Reject</button></div>`;
+    } else if (r.status === 'pending' && r.requested_by === me.id) {
+      actions = '<p class="note plain">You asked for this, so the committee must approve it.</p>';
+    } else if (r.status === 'pending' && f.committee) {
+      actions = '<p class="note plain">You have already voted.</p>';
+    }
+
+    return `
+    <article class="req">
+      <div class="req-top"><h3>${esc(requestTitle(r))}</h3>${pill(r.status)}</div>
+      <p class="meta" style="margin-top:4px">Asked by ${esc(memberName(r.requested_by))} on ${fmtDateTime(new Date(r.created_at))}.${
+        r.kind === 'type_change' && r.description ? ' Reason: "' + esc(r.description) + '"' : ''}</p>
+      ${sources ? `<p class="meta">Taken from: ${esc(sources)}.</p>` : ''}
+      ${r.status === 'pending' ? `<p class="rule">${RULE_TEXT}</p>` : ''}
+      ${votes ? `<ul class="votes">${votes}</ul>` : '<p class="meta" style="margin-top:8px">No votes yet.</p>'}
+      ${actions}
+    </article>`;
+  };
+
+  return groupHead(f) + `
+  <div class="screen-head"><h2>Approvals</h2>${f.isT ? '<button type="button" class="btn" data-action="go" data-screen="request">Ask to pay out money</button>' : ''}</div>
+  <p class="muted" style="margin-top:4px">Money only leaves the group after 2 committee members say yes, including the chairperson
+    or vice chairperson. ${f.committee ? '' : 'Ordinary members can see every decision, but only the committee votes.'}</p>
+  ${f.priv ? privacyNote('Loan requests from other members are private to the committee.') : ''}
+  <section class="section"><h2>Waiting for approval</h2>
+    <div class="list">${pending.length ? pending.map(card).join('') : '<p class="empty">Nothing is waiting for approval.</p>'}</div></section>
+  <section class="section"><h2>Decided</h2>
+    <div class="list">${decided.length ? decided.map(card).join('') : '<p class="empty">No decisions yet.</p>'}</div></section>`;
+}
+
+
+/* ---------- Ask to pay out money (treasurer) ---------- */
+
+// Fill in where the money comes from: mobile money first, then cash, then the bank.
+function fillSources(amount, avail) {
+  const out = { bank: 0, momo: 0, cash: 0 };
+  let left = round2(amount);
+  ['momo', 'cash', 'bank'].forEach((k) => {
+    const take = Math.min(left, Math.max(0, avail[k]));
+    out[k] = round2(take);
+    left = round2(left - take);
+  });
+  return out;
+}
+
+function requestScreen() {
+  const f = groupFacts();
+  const { G, g, month } = f;
+  if (!f.isT) return groupHead(f) + '<p class="infobox">Only the treasurer can ask to pay out money.</p>';
+
+  const kinds = g.type === 'chilimba'
+    ? [['payout', "Pay this month's receiver"], ['spending', 'Other group spending']]
+    : [['spending', 'Group spending']];
+  if (!kinds.some((k) => k[0] === S.reqKind)) S.reqKind = kinds[0][0];
+
+  const avail = { bank: Number(G.summary.avail_bank), momo: Number(G.summary.avail_momo), cash: Number(G.summary.avail_cash) };
+  const totalAvail = round2(avail.bank + avail.momo + avail.cash);
+  let top = '';
+  let amount = '';
+
+  if (S.reqKind === 'payout') {
+    const receiver = G.members.find((m) => m.rotation_position === month);
+    const pot = Number(g.monthly_amount) * G.members.length;
+    const existing = G.requests.find((r) => r.kind === 'payout' && r.cycle_month === month && r.status !== 'rejected');
+    const notConfirmed = G.members.filter((m) => G.summary.statuses[m.id] !== 'confirmed');
+
+    top = `<div class="infobox">This month's receiver is <strong>${esc(receiver ? receiver.full_name : 'nobody')}</strong>. The full pot is ${fmtK(pot)}.</div>`;
+    if (cycleMonth(g) < 1) top += '<div class="errors">The cycle has not started yet, so there is no payout this month.</div>';
+    if (existing) top += `<div class="errors">A payout for ${esc(mLabel(g, month))} has already been ${existing.status === 'pending' ? 'asked for and is waiting for approval' : 'approved'}.</div>`;
+    if (notConfirmed.length) {
+      top += `<div class="warnbox"><strong>${plural(notConfirmed.length, 'payment is', 'payments are')} not confirmed yet for this month:</strong>
+        ${esc(notConfirmed.map((m) => m.full_name).join(', '))}. You can still ask, but the committee may want to wait.</div>`;
+    }
+    amount = Math.min(pot, totalAvail);
+  }
+  const src = amount ? fillSources(amount, avail) : { bank: 0, momo: 0, cash: 0 };
+
+  return backTo('approvals', 'Approvals') + `
+  <h1 class="page-title">Ask to pay out money</h1>
+  <p class="lede">Your request goes to the committee. The money is only counted as paid out once it is approved.</p>
+  <div id="req-errors"></div>${top}
+  <div class="formcard">
+    <div class="field"><span class="label">What is the money for?</span>
+      <div class="chips" role="radiogroup">${kinds.map(([k, l]) =>
+        `<label class="chip"><input type="radio" name="r-kind" value="${k}"${S.reqKind === k ? ' checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+    ${S.reqKind === 'spending' ? `
+    <div class="field"><label for="r-reason">Reason</label>
+      <input type="text" id="r-reason" placeholder="For example: bank account charge">
+      <p class="hint">Be specific. The committee will read this before voting.</p></div>` : ''}
+    <div class="field"><label for="r-amount">Amount (K)</label>
+      <input type="number" id="r-amount" inputmode="decimal" min="0" step="0.01" value="${amount || ''}"></div>
+    <div class="field"><span class="label">Take the money from</span>
+      <p class="hint" style="margin:0 0 6px">Filled in for you. You can change the amounts. They must add up to the amount above.</p>
+      ${['momo', 'cash', 'bank'].map((k) => `
+      <div class="srcrow"><label for="src-${k}" style="font-weight:400">${esc(placeName(f, k))}<span class="meta" style="display:block">Available: ${fmtK(avail[k])}</span></label>
+        <input type="number" id="src-${k}" inputmode="decimal" min="0" step="0.01" value="${src[k] || ''}"></div>`).join('')}
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-action="save-request">Send for approval</button>
+      <button type="button" class="btn ghost" data-action="go" data-screen="approvals">Cancel</button>
+    </div>
+  </div>`;
+}
+
+
+/* ---------- Turns (chilimba) ---------- */
+function turnsScreen() {
+  const f = groupFacts();
+  const { G, g, me, month } = f;
+  if (g.type !== 'chilimba') return overviewScreen();
+
+  const pot = Number(g.monthly_amount) * G.members.length;
+  const confirmed = Number(G.summary.month_confirmed);
+  const rotation = G.members.slice().sort((a, b) => a.rotation_position - b.rotation_position);
+  const receiver = rotation.find((m) => m.rotation_position === month);
+  const next = rotation.find((m) => m.rotation_position === month + 1);
+  const started = cycleMonth(g) >= 1;
+
+  const items = rotation.map((m) => {
+    const n = m.rotation_position;
+    const payout = G.requests.find((r) => r.kind === 'payout' && r.cycle_month === n && r.status !== 'rejected');
+    let cls = '';
+    let info;
+    if (payout && payout.status === 'approved') {
+      cls = 'done';
+      info = pill('approved', `Received ${fmtK(payout.amount)} on ${fmtDate(new Date(payout.decided_at))}`);
+    } else if (payout) {
+      cls = n === month ? 'now' : '';
+      info = pill('pending', 'Payout waiting for approval');
+    } else if (started && n === month) {
+      cls = 'now';
+      info = `<span class="meta">This month. ${fmtK(confirmed)} of ${fmtK(pot)} confirmed so far.</span>`;
+    } else if (started && n < month) {
+      info = pill('rejected', 'Not paid out');
+    } else {
+      info = '<span class="meta">Upcoming</span>';
+    }
+    return `<li class="${cls}"><span class="n">${n}</span><div>
+      <div class="rname">${esc(m.full_name)}${m.id === me.id ? ' <span class="muted">(you)</span>' : ''}</div>
+      <div class="rinfo"><span class="meta">${esc(monthLabel(g, n))}</span>${info}</div></div></li>`;
+  }).join('');
+
+  const t = f.treasurer;
+  const treasurerLast = t && t.rotation_position === G.members.length;
+  const payButton = f.isT && started
+    ? '<div style="margin-top:12px"><button type="button" class="btn small" data-action="pay-receiver">Ask to pay this month&rsquo;s receiver</button></div>'
+    : '';
+
+  return groupHead(f) + `
+  <section class="hero">
+    <h2>${started ? 'This month the pot goes to' : 'The first pot goes to'}</h2>
+    <p class="who-big">${esc(receiver ? receiver.full_name : '')}</p>
+    <p style="margin-top:8px">Everyone pays ${fmtK(g.monthly_amount)}, so the full pot is ${fmtK(g.monthly_amount)} × ${G.members.length}
+      = <strong>${fmtK(pot)}</strong>. ${fmtK(confirmed)} is confirmed so far.</p>
+    ${next ? `<p class="meta" style="margin-top:4px">Next: ${esc(next.full_name)} in ${esc(monthLabel(g, month + 1))}.</p>` : ''}
+    ${payButton}
+  </section>
+  <section class="section"><h2>Order for receiving the pot</h2>
+    <p class="sub">Changing this order needs committee approval.</p>
+    <ol class="rot">${items}</ol>
+    ${treasurerLast ? `<div class="infobox"><strong>Why the treasurer is last:</strong> ${esc(t.full_name)} receives the pot in the final month.
+      The treasurer's own money stays in the group until everyone else has been paid, which makes running away with the money far less tempting.</div>` : ''}
+  </section>`;
+}
+
+
+/* ---------- Pop-up boxes for requests ---------- */
+function rejectBody(r) {
+  return `<p>${esc(requestTitle(r))}</p>
+  <div class="field"><label for="m-reason">Reason (optional)</label>
+    <textarea id="m-reason" placeholder="For example: this is not allowed by our group rules"></textarea></div>`;
+}
+
+function typeChangeBody(g) {
+  const now = g.next_type || g.type;
+  const other = now === 'chilimba' ? 'village' : 'chilimba';
+  return `<p>The group is a <strong>${TYPE[g.type]}</strong>. You are asking to change it to <strong>${TYPE[other]}</strong>.
+    This needs committee approval, and it would start with the next cycle so that no one's current money is affected.</p>
+  <div class="field"><label for="m-reason">Why do you want to change it?</label><textarea id="m-reason"></textarea></div>`;
 }

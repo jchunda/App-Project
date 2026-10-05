@@ -17,7 +17,8 @@ const S = {
   draft: null,       // the "Create a group" form while you fill it in
   join: null,        // the "Join a group" form: { code, preview }
   payTab: 'mine',    // Payments screen: 'mine' or 'all'
-  payMonth: 'all'    // Payments screen: which month to show under "All payments"
+  payMonth: 'all',   // Payments screen: which month to show under "All payments"
+  reqKind: null      // "Ask to pay out money": 'payout' or 'spending'
 };
 
 // Screens inside a group, and the function that draws each one (js/screens.js).
@@ -27,7 +28,10 @@ const GROUP_SCREENS = {
   record:   () => recordScreen(),
   members:  () => membersScreen(),
   history:  () => historyScreen(),
-  move:     () => moveScreen()
+  move:     () => moveScreen(),
+  approvals: () => approvalsScreen(),
+  request:  () => requestScreen(),
+  turns:    () => turnsScreen()
 };
 
 
@@ -93,17 +97,29 @@ async function openHome() {
 // Load everything about one group. The security rules decide what comes
 // back: in village banking, ordinary members only get their own payments.
 async function loadGroup(groupId) {
-  const [g, m, h, p, d, s] = await Promise.all([
+  const [g, m, h, p, d, s, r] = await Promise.all([
     db.from('groups').select('*').eq('id', groupId).single(),
     db.from('group_members').select('*').eq('group_id', groupId),
     db.from('history').select('*').eq('group_id', groupId).order('created_at', { ascending: false }).limit(200),
     db.from('payments').select('*').eq('group_id', groupId),
     db.from('bank_deposits').select('*').eq('group_id', groupId),
-    db.rpc('group_summary', { gid: groupId })
+    db.rpc('group_summary', { gid: groupId }),
+    db.from('requests').select('*').eq('group_id', groupId)
   ]);
-  const error = g.error || m.error || h.error || p.error || d.error || s.error;
+  let error = g.error || m.error || h.error || p.error || d.error || s.error || r.error;
   if (error) { toast(friendlyError(error)); return false; }
-  S.group = { info: g.data, members: m.data, history: h.data, payments: p.data, deposits: d.data, summary: s.data };
+
+  // Votes on the requests we can see.
+  const ids = r.data.map((x) => x.id);
+  let votes = [];
+  if (ids.length) {
+    const v = await db.from('votes').select('*').in('request_id', ids);
+    if (v.error) { toast(friendlyError(v.error)); return false; }
+    votes = v.data;
+  }
+
+  S.group = { info: g.data, members: m.data, history: h.data, payments: p.data, deposits: d.data,
+              summary: s.data, requests: r.data, votes };
   return true;
 }
 
@@ -456,6 +472,96 @@ async function saveDeposit(button) {
 }
 
 
+/* ---------- Requests and votes ---------- */
+
+async function saveRequest(button) {
+  const f = groupFacts();
+  const kind = S.reqKind;
+  const amount = parseFloat(val('r-amount'));
+  const reason = kind === 'spending' ? val('r-reason').trim() : '';
+  const avail = { bank: Number(f.G.summary.avail_bank), momo: Number(f.G.summary.avail_momo), cash: Number(f.G.summary.avail_cash) };
+  const src = {};
+  let total = 0;
+
+  const errs = [];
+  markField('r-amount', !(amount > 0));
+  if (!(amount > 0)) errs.push('Enter the amount.');
+  if (kind === 'spending') {
+    markField('r-reason', reason.length < 4);
+    if (reason.length < 4) errs.push('Give a clear reason for the spending.');
+  }
+  if (kind === 'payout' && f.G.requests.some((r) => r.kind === 'payout' && r.cycle_month === f.month && r.status !== 'rejected')) {
+    errs.push(`A payout for Month ${f.month} has already been asked for.`);
+  }
+  ['momo', 'cash', 'bank'].forEach((k) => {
+    const v = parseFloat(val('src-' + k)) || 0;
+    src[k] = round2(v);
+    total += v;
+    if (v < 0) errs.push('Amounts cannot be negative.');
+    const tooMuch = v > avail[k] + 0.001;
+    markField('src-' + k, tooMuch);
+    if (tooMuch) errs.push(`Only ${fmtK(avail[k])} is available in ${placeName(f, k).toLowerCase()}.`);
+  });
+  total = round2(total);
+  if (amount > 0 && Math.abs(total - amount) > 0.001) {
+    errs.push(`The amounts you are taking add up to ${fmtK(total)}, but the request is for ${fmtK(amount)}. They must match.`);
+  }
+  showErrors('req-errors', errs);
+  if (errs.length) return;
+
+  const done = setBusy(button, 'Sending…');
+  const { error } = kind === 'payout'
+    ? await db.rpc('request_payout', { p_group_id: f.g.id, p_amount: round2(amount), p_bank: src.bank, p_momo: src.momo, p_cash: src.cash })
+    : await db.rpc('request_spending', { p_group_id: f.g.id, p_amount: round2(amount), p_reason: reason, p_bank: src.bank, p_momo: src.momo, p_cash: src.cash });
+  done();
+  if (error) { showErrors('req-errors', [friendlyError(error)]); return; }
+
+  S.screen = 'approvals';
+  await refreshGroup();
+  window.scrollTo(0, 0);
+  toast('Request sent. It needs 2 committee members to say yes.');
+}
+
+// After a vote, say what happened.
+const voteMessage = (status, vote) =>
+  status === 'approved' ? 'Approved. The request now has enough yes votes.'
+  : status === 'rejected' ? 'Request rejected. No money was moved.'
+  : vote === 'yes' ? 'Your yes vote is recorded. It still needs more approval.'
+  : 'Your no vote is recorded.';
+
+async function voteYes(requestId, button) {
+  const done = setBusy(button, 'Saving…');
+  const { data: status, error } = await db.rpc('vote_request', { p_request_id: requestId, p_vote: 'yes', p_reason: null });
+  done();
+  if (error) { toast(friendlyError(error)); return; }
+  await refreshGroup();
+  toast(voteMessage(status, 'yes'));
+}
+
+function voteNo(requestId) {
+  const r = S.group.requests.find((x) => x.id === requestId);
+  openModal('Reject this request?', rejectBody(r), 'Reject request', async () => {
+    const { data: status, error } = await db.rpc('vote_request',
+      { p_request_id: requestId, p_vote: 'no', p_reason: val('m-reason').trim() });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast(voteMessage(status, 'no'));
+  }, true);
+}
+
+function askTypeChange() {
+  const g = S.group.info;
+  openModal('Ask to change the group type', typeChangeBody(g), 'Send for approval', async () => {
+    const reason = val('m-reason').trim();
+    if (reason.length < 5) return 'Please give a reason. The committee will read it before voting.';
+    const { error } = await db.rpc('request_type_change', { p_group_id: g.id, p_reason: reason });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast('Request sent. The committee can vote on it in Approvals.');
+  });
+}
+
+
 /* ---------- Buttons ---------- */
 
 document.addEventListener('click', async (event) => {
@@ -518,7 +624,29 @@ document.addEventListener('click', async (event) => {
     // Group menu and links between group screens
     case 'go':
       if (button.dataset.tab) S.payTab = button.dataset.tab;
+      if (button.dataset.screen === 'request') S.reqKind = null;
       go(button.dataset.screen);
+      break;
+
+    case 'pay-receiver':
+      S.reqKind = 'payout';
+      go('request');
+      break;
+
+    case 'save-request':
+      await saveRequest(button);
+      break;
+
+    case 'vote-yes':
+      await voteYes(button.dataset.id, button);
+      break;
+
+    case 'vote-no':
+      voteNo(button.dataset.id);
+      break;
+
+    case 'ask-type':
+      askTypeChange();
       break;
 
     case 'pay-tab':
@@ -588,4 +716,5 @@ document.addEventListener('change', (event) => {
   if (t.name === 'f-method') updateRefField('f', t.value);
   if (t.name === 'm-method') updateRefField('m', t.value);
   if (t.id === 'pay-month') { S.payMonth = t.value; render(true); }
+  if (t.name === 'r-kind') { S.reqKind = t.value; render(true); }
 });
