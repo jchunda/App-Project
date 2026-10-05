@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Usambazi</title>
+<meta name="description" content="Clear, shared records for chilimbas and village banking groups.">
 
 <!-- Fonts from Google Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,75 +15,21 @@
 </head>
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner"><span class="brand">Usambazi</span></div>
-</header>
+<!-- The app draws every screen inside this box (see js/app.js). -->
+<div id="app">
+  <main class="content"><p class="muted">Loading Usambazi…</p></main>
+</div>
 
-<main class="content">
-  <h1 class="page-title">Connection check</h1>
-  <p class="muted" style="margin-top:6px">This page checks that the app can talk to the database and that login works.</p>
-
-  <!-- 1. The three checks -->
-  <section class="section" aria-labelledby="checks-title">
-    <h2 id="checks-title">Checks</h2>
-    <ul class="checks" aria-live="polite">
-      <li id="check-keys">
-        <span>Keys in config.js</span><span class="pill wait">… Checking</span>
-        <span class="detail"></span>
-      </li>
-      <li id="check-db">
-        <span>Database</span><span class="pill wait">… Checking</span>
-        <span class="detail"></span>
-      </li>
-      <li id="check-login">
-        <span>Login</span><span class="pill wait">… Checking</span>
-        <span class="detail"></span>
-      </li>
-    </ul>
-  </section>
-
-  <!-- 2. Login test: shown when nobody is logged in -->
-  <section class="section" id="auth-section" aria-labelledby="auth-title">
-    <h2 id="auth-title">Try logging in</h2>
-    <p class="sub">Use any test email. New here? Fill in your name and press "Sign up".</p>
-    <form class="formcard" id="auth-form" novalidate>
-      <div class="field">
-        <label for="full-name">Your full name (only for sign up)</label>
-        <input type="text" id="full-name" autocomplete="name">
-      </div>
-      <div class="field">
-        <label for="email">Email</label>
-        <input type="email" id="email" autocomplete="email" required>
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" autocomplete="current-password" required>
-        <p class="hint">At least 6 characters.</p>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn" id="login-btn">Log in</button>
-        <button type="button" class="btn ghost" id="signup-btn">Sign up</button>
-      </div>
-      <p class="note hidden" id="auth-message" role="alert"></p>
-    </form>
-  </section>
-
-  <!-- 3. Shown when someone is logged in -->
-  <section class="section hidden" id="user-section" aria-labelledby="user-title">
-    <h2 id="user-title">You are logged in</h2>
-    <div class="formcard">
-      <p style="margin-top:12px" id="user-info"></p>
-      <div class="form-actions">
-        <button type="button" class="btn ghost" id="logout-btn">Log out</button>
-      </div>
-    </div>
-  </section>
-</main>
+<!-- Short messages such as "Group created" appear here. -->
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <!-- Scripts: classic tags (not type="module") so the page works when
-     opened straight from your computer. Order matters. -->
+     opened straight from your computer. Order matters:
+     1. Supabase library  2. your keys  3. helpers  4. screens  5. the app -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
-<script src="app.js"></script>
+<script src="js/helpers.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

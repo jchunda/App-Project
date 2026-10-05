@@ -1,6 +1,7 @@
 /* =====================================================================
-   Usambazi: app.js
-   Phase 0: connection check and a simple login test.
+   Usambazi: check.js
+   Connection check page (check.html). Use it to troubleshoot
+   the Supabase setup. The real app is index.html.
    ===================================================================== */
 (function () {
   'use strict';

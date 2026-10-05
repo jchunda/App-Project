@@ -120,3 +120,126 @@ input[type=text], input[type=email], input[type=password], input[type=tel] {
 .checks li:last-child { border-bottom: 0; }
 .checks .detail { width: 100%; font-size: 14.5px; color: var(--muted); }
 .hidden { display: none !important; }
+
+
+/* =====================================================================
+   App screens (index.html). Copied from reference/prototype.html.
+   ===================================================================== */
+
+/* ---------- Top bar ---------- */
+.topbar { position: sticky; top: 0; z-index: 30; }
+.topbar-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+button.brand { background: none; border: 0; color: inherit; padding: 0; cursor: pointer; }
+.topbar .who { font-size: 14px; opacity: .92; }
+.topbar .btn-bar {
+  background: rgba(255,255,255,.13); color: var(--on-bar); border: 0; border-radius: 999px;
+  padding: 6px 14px; min-height: 40px; cursor: pointer; font-weight: 700;
+}
+
+/* ---------- Text ---------- */
+.lede { color: var(--muted); margin-top: 8px; max-width: 60ch; }
+.meta { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.num { font-variant-numeric: tabular-nums; }
+.empty { padding: 22px 16px; color: var(--muted); text-align: center; }
+.screen-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 28px; }
+.screen-head h2 { font-size: 21px; }
+.back {
+  display: inline-flex; align-items: center; gap: 4px; background: none; border: 0;
+  color: var(--primary); font-weight: 700; padding: 8px 0; cursor: pointer; min-height: 44px;
+}
+.back svg { width: 18px; height: 18px; }
+
+/* ---------- Lists ---------- */
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-top: 12px; }
+.list > * + * { border-top: 1px solid var(--line); }
+.row { padding: 13px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.row .right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.role-tag {
+  display: inline-block; font-size: 12.5px; font-weight: 700; color: var(--primary);
+  border: 1.5px solid currentColor; border-radius: 6px; padding: 0 6px; margin-left: 6px; vertical-align: 2px;
+}
+
+/* My groups */
+.grow {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 14px;
+  text-align: left; background: var(--surface); border: 0; color: inherit; padding: 16px; cursor: pointer;
+}
+.grow:hover { background: var(--surface-2); }
+.grow-name { display: block; font-family: "Bricolage Grotesque", system-ui, sans-serif; font-weight: 800; font-size: 19px; line-height: 1.2; }
+.grow-meta { display: block; color: var(--muted); font-size: 14.5px; margin: 3px 0 6px; }
+.grow-amt { text-align: right; font-family: "Bricolage Grotesque", system-ui, sans-serif; font-weight: 800; font-size: 20px; white-space: nowrap; }
+.grow-amt small { display: block; font-family: "Atkinson Hyperlegible", system-ui, sans-serif; font-weight: 400; font-size: 13px; color: var(--muted); }
+
+/* Group heading */
+.group-head h1 { font-size: clamp(24px, 6.4vw, 30px); }
+.group-sub { color: var(--muted); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.type-badge {
+  display: inline-flex; align-items: center; gap: 5px; background: var(--surface-2); color: var(--ink);
+  font-weight: 700; font-size: 13.5px; padding: 3px 10px; border-radius: 6px;
+}
+.type-badge svg { width: 14px; height: 14px; }
+
+/* History */
+.hentry { padding: 12px 16px; display: grid; grid-template-columns: 1fr; gap: 2px; }
+.hentry .who-line { font-weight: 700; }
+.hentry .when { font-size: 13.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Invite code */
+.invite-code {
+  font-family: "Bricolage Grotesque", system-ui, sans-serif; font-weight: 800; font-size: 34px;
+  letter-spacing: .12em; margin-top: 10px; color: var(--copper-ink);
+}
+.invite-card { background: var(--copper-soft); border-radius: 16px; padding: 16px; margin-top: 14px; }
+
+/* ---------- Forms ---------- */
+.field > .label { display: block; font-weight: 700; margin-bottom: 6px; }
+input[type=number], select {
+  width: 100%; font: inherit; font-size: 16px; min-height: 48px; padding: 10px 12px;
+  border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink);
+}
+input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--bad); }
+.btn.small { min-height: 42px; padding: 0 14px; font-size: 15px; }
+.btn.block { width: 100%; }
+
+.errors { background: var(--bad-bg); color: var(--bad); border-radius: 10px; padding: 11px 14px; margin-top: 14px; font-weight: 700; }
+.errors ul { margin: 4px 0 0; padding-left: 18px; font-weight: 400; color: var(--ink); }
+
+/* Two-option switch (log in / create an account) */
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; margin-top: 18px; }
+.seg button {
+  border: 0; background: transparent; color: var(--ink); font-size: 15px; padding: 8px 16px;
+  border-radius: 999px; min-height: 44px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 700; }
+
+/* Large choice cards (group type, "this is me") */
+.typecards { display: grid; gap: 10px; }
+@media (min-width: 560px) { .typecards { grid-template-columns: 1fr 1fr; } }
+.typecard { position: relative; display: block; }
+.typecard input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.typecard .tc {
+  display: block; border: 1.5px solid var(--line-strong); border-radius: 14px; padding: 14px;
+  cursor: pointer; height: 100%; background: var(--surface);
+}
+.typecard .tc strong { display: block; font-family: "Bricolage Grotesque", system-ui, sans-serif; font-size: 18px; }
+.typecard .tc span { display: block; color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+.typecard input:checked + .tc { border-color: var(--primary); box-shadow: inset 0 0 0 1.5px var(--primary); background: var(--ok-bg); }
+.typecard input:focus-visible + .tc { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Member rows on "Create a group" */
+.mrow { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.mrow:first-of-type { border-top: 0; }
+@media (min-width: 560px) { .mrow { grid-template-columns: 1.4fr 1fr 1fr auto; align-items: end; } }
+.mrow label { display: block; font-weight: 700; margin-bottom: 4px; font-size: 15px; }
+.mrow .x { min-height: 48px; }
+
+/* ---------- Status pill: grey ---------- */
+.pill.none { background: var(--surface-2); color: var(--muted); }
+
+/* ---------- Toast (short message at the bottom) ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 12px; z-index: 60;
+  max-width: calc(100% - 32px); font-weight: 700; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+.toast[hidden] { display: none; }

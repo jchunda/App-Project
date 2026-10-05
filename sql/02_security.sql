@@ -11,8 +11,8 @@
 -- How to run: SQL Editor -> paste this whole file -> Run.
 -- Run it after 01_tables.sql. Safe to run again.
 --
--- Phase 0: only "profiles" gets rules. Every other table stays locked
--- until the phase that uses it adds its rules to this file.
+-- Each phase adds the rules for the tables it uses. Tables without
+-- rules yet (payments, requests, votes, loans, ...) stay fully locked.
 --
 -- Append-only rule: payments, loan_repayments, bank_deposits,
 -- money_references and history will NEVER get update or delete rules.
@@ -55,3 +55,86 @@ create policy "Update own profile" on public.profiles
 
 -- No insert rule: the profile row is created by the sign-up trigger.
 -- No delete rule: profiles are removed only if the login is deleted.
+
+
+-- =====================================================================
+-- Phase 1: groups, members and history
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- Helper functions used by the rules below.
+-- "security definer" lets them look at group_members without being
+-- blocked by group_members' own rules (otherwise the rule would have to
+-- check itself, forever).
+-- ---------------------------------------------------------------------
+
+-- Is the logged-in person a member of this group?
+create or replace function public.is_group_member(gid uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.group_members
+    where group_id = gid and user_id = auth.uid()
+  );
+$$;
+
+-- Is the logged-in person on this group's committee (any role except Member)?
+create or replace function public.is_committee(gid uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.group_members
+    where group_id = gid and user_id = auth.uid() and role <> 'member'
+  );
+$$;
+
+-- May the logged-in person see something about this member's money?
+-- (Privacy rules, CLAUDE.md section 7.)
+--   Yes if it is group-wide (no subject), or the group is a chilimba,
+--   or they are on the committee, or it is about themselves.
+create or replace function public.can_see_subject(gid uuid, subject uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select subject is null
+      or exists (select 1 from public.groups where id = gid and type = 'chilimba')
+      or public.is_committee(gid)
+      or exists (select 1 from public.group_members where id = subject and user_id = auth.uid());
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- groups: you can see the groups you belong to.
+-- Groups are created only through the create_group function
+-- (03_functions.sql), which checks all the rules. So there is no
+-- insert, update or delete rule here.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see their groups" on public.groups;
+create policy "Members see their groups" on public.groups
+  for select to authenticated
+  using (public.is_group_member(id));
+
+
+-- ---------------------------------------------------------------------
+-- group_members: you can see everyone in your own groups.
+-- Members are added by create_group and linked by join_group.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see fellow members" on public.group_members;
+create policy "Members see fellow members" on public.group_members
+  for select to authenticated
+  using (public.is_group_member(group_id));
+
+
+-- ---------------------------------------------------------------------
+-- history: you can see your group's history, except that ordinary
+-- village banking members only see entries about the whole group or
+-- about themselves. Nobody can add, edit or delete entries directly:
+-- only database functions write history.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see group history" on public.history;
+create policy "Members see group history" on public.history
+  for select to authenticated
+  using (public.is_group_member(group_id)
+         and public.can_see_subject(group_id, subject_member));
