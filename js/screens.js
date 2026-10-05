@@ -285,6 +285,41 @@ function requestTitle(r) {
   return 'Request';
 }
 
+// The maths for one loan (CLAUDE.md section 8; the database uses the same formulas).
+function loanCalc(f, loan) {
+  const reps = f.G.repayments.filter((r) => r.loan_id === loan.id);
+  const replaced = new Set(reps.filter((r) => r.corrects_id).map((r) => r.corrects_id));
+  const counted = reps.filter((r) => !replaced.has(r.id));
+  const amount = Number(loan.amount);
+  const interest = round2(amount * (Number(loan.rate) / 100) * loan.months);   // flat interest
+  const total = round2(amount + interest);
+  const monthly = round2(total / loan.months);
+  const paid = round2(counted.reduce((t, r) => t + Number(r.amount), 0));
+  const paidConfirmed = round2(counted.filter((r) => r.status === 'confirmed').reduce((t, r) => t + Number(r.amount), 0));
+  const remaining = round2(Math.max(0, total - paid));
+  // Repayments pay off the interest first, then the amount borrowed.
+  const outstanding = loan.sent_on ? round2(Math.max(0, amount - Math.max(0, paid - interest))) : 0;
+  const dueMonth = loan.start_month ? loan.start_month + loan.months : null;
+  const overdue = loan.status === 'active' && remaining > 0 && cycleMonth(f.g) > dueMonth;
+  return { interest, total, monthly, paid, paidConfirmed, remaining, outstanding, dueMonth, overdue, reps };
+}
+
+// The loan calculator steps, in plain words.
+function loanSteps(g, amount, months, you) {
+  const rate = Number(g.loan_rate);
+  const perMonth = round2(amount * rate / 100);
+  const interest = round2(perMonth * months);
+  const total = round2(amount + interest);
+  const monthly = round2(total / months);
+  const w = you ? 'You' : 'They';
+  return `<ol class="steps">
+    <li>${w} borrow <strong>${fmtK(amount)}</strong>.</li>
+    <li>Interest is ${rate}% of ${fmtK(amount)} for each month: <strong>${fmtK(perMonth)} a month</strong>.</li>
+    <li>For ${plural(months, 'month', 'months')}, that is ${fmtK(perMonth)} × ${months} = <strong>${fmtK(interest)} interest</strong>.</li>
+    <li>${w} pay back ${fmtK(amount)} + ${fmtK(interest)} = <strong>${fmtK(total)}</strong>.</li>
+    <li>That is <strong>${fmtK(monthly)} a month</strong> for ${plural(months, 'month', 'months')}.</li></ol>`;
+}
+
 // Where the money is taken from, in words.
 function placeName(f, place) {
   const t = f.treasurer ? f.treasurer.full_name : 'the treasurer';
@@ -307,6 +342,20 @@ const savedBy = (f, memberId) =>
                  .reduce((t, p) => t + Number(p.amount), 0));
 
 
+/* ---------- Loan things that need me ---------- */
+// As the borrower: confirm receiving the money, or confirm a repayment.
+// As the treasurer: send an approved loan.
+function borrowerMustConfirm(f, l) {
+  if (l.member_id !== f.me.id) return false;
+  const waitingRepayment = loanCalc(f, l).reps.some((r) =>
+    r.status === 'waiting' && !f.G.repayments.some((x) => x.corrects_id === r.id));
+  return (l.sent_on && !l.received_at) || waitingRepayment;
+}
+function myLoanTodo(f) {
+  return (f.G.loans || []).filter((l) => borrowerMustConfirm(f, l) || (f.isT && l.status === 'approved')).length;
+}
+
+
 /* ---------- Group menu and heading ---------- */
 function groupNav(f) {
   const myWaiting = f.active.filter((p) => p.member_id === f.me.id && p.status === 'waiting').length;
@@ -320,14 +369,16 @@ function groupNav(f) {
        ['history',  'History',  'clock', 0]]
     : [['overview', 'Overview', 'home', 0],
        ['payments', 'Payments', 'receipt', myWaiting],
+       ['loans',    'Loans',    'hand', myLoanTodo(f)],
        ['shareout', 'Share-out', 'pie', 0],
        ['approvals', 'Approvals', 'shield', myVotes],
-       ['members',  'Members',  'people', 0],
+       ['members',  'Members',  'people', 0, true],   // true = only in the side menu on larger screens
        ['history',  'History',  'clock', 0]];
-  const parent = { record: 'payments', move: 'overview', request: 'approvals' };
+  const parent = { record: 'payments', move: 'overview', request: 'approvals', loanreq: 'loans' };
   const on = parent[S.screen] || S.screen;
-  return `<nav class="nav" aria-label="Group menu" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([screen, label, ic, badge]) =>
-    `<button type="button" data-action="go" data-screen="${screen}"${on === screen ? ' aria-current="page"' : ''}>${icon(ic)}<span>${label}</span>${
+  const phoneCount = items.filter((i) => !i[4]).length;
+  return `<nav class="nav" aria-label="Group menu" style="grid-template-columns:repeat(${phoneCount},1fr)">${items.map(([screen, label, ic, badge, desk]) =>
+    `<button type="button"${desk ? ' class="desk"' : ''} data-action="go" data-screen="${screen}"${on === screen ? ' aria-current="page"' : ''}>${icon(ic)}<span>${label}</span>${
       badge ? `<span class="badge" aria-label="${badge} waiting for you">${badge}</span>` : ''}</button>`).join('')}</nav>`;
 }
 
@@ -411,6 +462,16 @@ function overviewScreen() {
   if (myWaiting) items.push(['bad', `You have ${plural(myWaiting, 'payment', 'payments')} to confirm`, 'Check it against your mobile money message.', 'payments', 'mine']);
   if (myVotes) items.push(['bad', `${plural(myVotes, 'request needs', 'requests need')} your vote`, 'Money cannot leave the group until the committee approves it.', 'approvals']);
   if (pending.length && !myVotes) items.push(['wait', `${plural(pending.length, 'request is', 'requests are')} waiting for committee approval`, '', 'approvals']);
+  if (g.type === 'village') {
+    const loans = G.loans || [];
+    const mineTodo = loans.filter((l) => borrowerMustConfirm(f, l)).length;
+    const toSend = f.isT ? loans.filter((l) => l.status === 'approved').length : 0;
+    const overdue = loans.filter((l) => loanCalc(f, l).overdue && (f.committee || l.member_id === me.id));
+    if (mineTodo) items.push(['bad', 'Your loan needs you to confirm something', 'Check the money you received or repaid.', 'loans']);
+    if (toSend) items.push(['bad', `${plural(toSend, 'approved loan is', 'approved loans are')} waiting for you to send`, '', 'loans']);
+    if (overdue.length) items.push(['bad', `${plural(overdue.length, 'loan is', 'loans are')} overdue`,
+      f.committee ? overdue.map((l) => memberName(l.member_id)).join(', ') : 'Please repay as soon as you can.', 'loans']);
+  }
   if (!priv) {
     if (disputed) items.push(['bad', `${plural(disputed, 'payment is', 'payments are')} disputed`,
       f.isT ? 'Check with the member and fix it with a correction.' : 'Everyone can see these until the treasurer adds a correction.', 'payments', 'all']);
@@ -455,7 +516,7 @@ function overviewScreen() {
   const payouts = G.requests.filter((r) => r.kind === 'payout' && r.status === 'approved');
   const totals = g.type === 'chilimba'
     ? `${fmtK(G.summary.paid_out)} paid out so far to ${plural(payouts.length, 'member', 'members')}.`
-    : `${fmtK(G.summary.confirmed_savings)} confirmed savings so far this cycle.`;
+    : `${fmtK(G.summary.confirmed_savings)} confirmed savings and ${fmtK(G.summary.interest_received)} loan interest received so far this cycle.`;
 
   // Group type: locked. Anyone can ask to change it; the committee decides.
   const typePending = pending.some((r) => r.kind === 'type_change');
@@ -791,6 +852,19 @@ function approvalsScreen() {
       .filter((k) => Number(r['from_' + k]) > 0)
       .map((k) => `${fmtK(r['from_' + k])} from ${placeName(f, k).toLowerCase()}`).join(', ');
 
+    // Loan requests: the purpose and the maths, so the committee can decide.
+    let loanInfo = '';
+    if (r.kind === 'loan') {
+      const loan = (G.loans || []).find((l) => l.request_id === r.id);
+      if (loan) {
+        const c = loanCalc(f, loan);
+        const saved = savedBy(f, loan.member_id);
+        loanInfo = `<p class="meta">Reason: "${esc(loan.purpose)}". Interest ${fmtK(c.interest)}, total to repay ${fmtK(c.total)}
+          (${fmtK(c.monthly)} a month).${f.committee ? ` ${esc(firstName(loan.member_id))}'s savings: ${fmtK(saved)},
+          so the limit is ${fmtK(saved * Number(f.g.loan_multiple))}.` : ''}</p>`;
+      }
+    }
+
     let actions = '';
     if (canVote(f, r)) {
       actions = `<div class="actions">
@@ -808,6 +882,7 @@ function approvalsScreen() {
       <p class="meta" style="margin-top:4px">Asked by ${esc(memberName(r.requested_by))} on ${fmtDateTime(new Date(r.created_at))}.${
         r.kind === 'type_change' && r.description ? ' Reason: "' + esc(r.description) + '"' : ''}</p>
       ${sources ? `<p class="meta">Taken from: ${esc(sources)}.</p>` : ''}
+      ${loanInfo}
       ${r.status === 'pending' ? `<p class="rule">${RULE_TEXT}</p>` : ''}
       ${votes ? `<ul class="votes">${votes}</ul>` : '<p class="meta" style="margin-top:8px">No votes yet.</p>'}
       ${actions}
@@ -1059,4 +1134,212 @@ function typeChangeBody(g) {
   return `<p>The group is a <strong>${TYPE[g.type]}</strong>. You are asking to change it to <strong>${TYPE[other]}</strong>.
     This needs committee approval, and it would start with the next cycle so that no one's current money is affected.</p>
   <div class="field"><label for="m-reason">Why do you want to change it?</label><textarea id="m-reason"></textarea></div>`;
+}
+
+
+/* ---------- One loan, as a card ---------- */
+function loanCard(f, l) {
+  const { g, me } = f;
+  const c = loanCalc(f, l);
+  const own = l.member_id === me.id;
+  const replaced = new Set(c.reps.filter((r) => r.corrects_id).map((r) => r.corrects_id));
+
+  let status;
+  if (l.status === 'requested') status = pill('pending', 'Waiting for committee approval');
+  else if (l.status === 'rejected') status = pill('rejected');
+  else if (l.status === 'approved') status = pill('tosend');
+  else if (l.status === 'repaid') status = pill('repaid');
+  else status = c.overdue ? pill('overdue', `Overdue since ${monthLabel(g, c.dueMonth)}`) : pill('repaying');
+
+  const due = c.dueMonth ? `by the end of ${monthLabel(g, c.dueMonth)}` : `${plural(l.months, 'month', 'months')} after it is sent`;
+
+  const repayments = c.reps.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map((r) => {
+    const isReplaced = replaced.has(r.id);
+    let acts = '';
+    if (!isReplaced && own && r.status === 'waiting') {
+      acts += `<button type="button" class="btn small" data-action="rp-confirm" data-id="${r.id}">Yes, I paid this</button>
+               <button type="button" class="btn small danger-ghost" data-action="rp-dispute" data-id="${r.id}">This is wrong</button>`;
+    }
+    if (!isReplaced && f.isT && l.status === 'active') {
+      acts += `<button type="button" class="btn small ghost" data-action="rp-correct" data-id="${r.id}">Fix with a correction</button>`;
+    }
+    return `<div class="rp">
+      <span><strong class="num"${isReplaced ? ' style="text-decoration:line-through;color:var(--muted)"' : ''}>${fmtK(r.amount)}</strong>
+        <span class="meta">on ${fmtDate(parseDay(r.paid_on))}, ${esc(method(r.method).label)}${r.reference ? ', ref ' + esc(r.reference) : ''}</span>
+        ${r.dispute_reason ? `<span class="meta" style="display:block">"${esc(r.dispute_reason)}"</span>` : ''}
+        ${r.correction_reason ? `<span class="meta" style="display:block">Correction: "${esc(r.correction_reason)}"</span>` : ''}</span>
+      ${pill(isReplaced ? 'corrected' : r.status)}
+      ${acts ? `<span class="actions" style="margin:0">${acts}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  let actions = '';
+  if (f.isT && l.status === 'approved') actions += `<button type="button" class="btn small" data-action="loan-send" data-id="${l.id}">Send the money</button>`;
+  if (f.isT && l.status === 'active') actions += `<button type="button" class="btn small" data-action="loan-repay" data-id="${l.id}">Record a repayment</button>`;
+  if (own && l.sent_on && !l.received_at) actions += `<button type="button" class="btn small" data-action="loan-received" data-id="${l.id}">Yes, I received ${fmtK(l.amount)}</button>`;
+
+  const sentText = l.sent_on
+    ? `Sent on ${fmtDate(parseDay(l.sent_on))} (ref ${esc(l.sent_reference)}). ${l.received_at
+        ? 'Receipt confirmed by ' + esc(firstName(l.member_id)) + '.' : 'Not yet confirmed as received.'} `
+    : '';
+
+  return `
+  <article class="loan">
+    <div class="loan-top">
+      <div><h3>${esc(memberName(l.member_id))}${own ? ' <span class="muted" style="font-size:15px;font-weight:400">(you)</span>' : ''}</h3>
+        <p class="meta">"${esc(l.purpose)}", asked on ${fmtDate(new Date(l.created_at))}</p></div>
+      ${status}
+    </div>
+    <ul class="calc">
+      <li><span>Borrowed</span><span class="v">${fmtK(l.amount)}</span></li>
+      <li><span>Interest (${Number(l.rate)}% a month × ${plural(l.months, 'month', 'months')})</span><span class="v">+ ${fmtK(c.interest)}</span></li>
+      <li class="total"><span>Total to repay</span><span class="v">${fmtK(c.total)}</span></li>
+      <li><span>Each month</span><span class="v">${fmtK(c.monthly)}</span></li>
+      ${l.sent_on ? `<li><span>Repaid so far</span><span class="v">${fmtK(c.paid)}</span></li>
+                     <li><span>Still to pay</span><span class="v">${fmtK(c.remaining)}</span></li>` : ''}
+    </ul>
+    ${l.sent_on ? `<div class="progress" role="img" aria-label="${Math.round((c.paid / c.total) * 100)}% repaid"><span style="width:${Math.min(100, (c.paid / c.total) * 100)}%"></span></div>` : ''}
+    <p class="meta" style="margin-top:8px">${sentText}Repay ${due}.</p>
+    ${repayments ? `<div style="margin-top:8px">${repayments}</div>` : ''}
+    ${actions ? `<div class="actions">${actions}</div>` : ''}
+  </article>`;
+}
+
+
+/* ---------- Loans (village banking) ---------- */
+function loansScreen() {
+  const f = groupFacts();
+  const { G, g, me } = f;
+  if (g.type !== 'village') return overviewScreen();
+
+  const loans = G.loans || [];
+  const activeCount = loans.filter((l) => l.status === 'active').length;
+  const order = { approved: 0, requested: 1, active: 2, repaid: 3, rejected: 4 };
+  const all = loans.slice().sort((a, b) =>
+    (order[a.status] - order[b.status]) ||
+    (Number(loanCalc(f, b).overdue) - Number(loanCalc(f, a).overdue)) ||
+    (new Date(b.created_at) - new Date(a.created_at)));
+  const mine = all.filter((l) => l.member_id === me.id);
+
+  const rules = `
+  <div class="rules">
+    <div class="rule-item"><strong>${Number(g.loan_rate)}% a month</strong><span>Interest on the amount borrowed, for each month of the loan.</span></div>
+    <div class="rule-item"><strong>${Number(g.loan_multiple)} × your savings</strong><span>The most you can borrow.</span></div>
+    <div class="rule-item"><strong>Up to ${plural(g.loan_max_months, 'month', 'months')}</strong><span>Time to repay. One loan at a time.</span></div>
+  </div>
+  <p class="hint" style="margin-top:8px">Repayments pay off the interest first, then the amount borrowed. All interest goes to the group
+    and is shared out at the end of the cycle, so borrowers also get a share of it. Changing these rules needs committee approval.</p>`;
+
+  const summary = `<div class="formcard" style="padding:16px"><span class="big">${fmtK(G.summary.lent)}</span>
+    <span class="muted">lent out right now${f.committee ? ` to ${plural(activeCount, 'member', 'members')}` : ''}.
+    ${fmtK(G.summary.interest_received)} interest received so far.</span></div>`;
+
+  const body = f.committee
+    ? `<section class="section"><h2>All loans</h2><p class="sub">Visible to the committee only.</p>
+        <div class="list">${all.length ? all.map((l) => loanCard(f, l)).join('') : '<p class="empty">No loans yet.</p>'}</div></section>`
+    : `<section class="section"><h2>My loans</h2>
+        <div class="list">${mine.length ? mine.map((l) => loanCard(f, l)).join('') : '<p class="empty">You have not borrowed from the group yet.</p>'}</div>
+        ${privacyNote("Other members' loans are only visible to the committee. Everyone can see the total lent out.")}</section>`;
+
+  return groupHead(f) + `
+  <div class="screen-head"><h2>Loans</h2><button type="button" class="btn" data-action="go" data-screen="loanreq">Ask for a loan</button></div>
+  ${summary}
+  <section class="section"><h2>Group loan rules</h2>${rules}</section>
+  ${body}`;
+}
+
+
+/* ---------- Ask for a loan ---------- */
+function loanCalcBox(g, amount, months) {
+  const a = parseFloat(amount);
+  if (!(a > 0)) return '<h3>How the loan works out</h3><p class="meta" style="margin-top:6px">Enter an amount to see the calculation.</p>';
+  return `<h3>How the loan works out</h3>${loanSteps(g, round2(a), months, true)}
+    <p class="meta">The interest goes to the group, and you get a share of it back at share-out.</p>`;
+}
+
+function loanreqScreen() {
+  const f = groupFacts();
+  const { G, g, me } = f;
+  if (g.type !== 'village') return overviewScreen();
+
+  const saved = savedBy(f, me.id);
+  const limit = round2(saved * Number(g.loan_multiple));
+  const avail = round2(Number(G.summary.avail_bank) + Number(G.summary.avail_momo) + Number(G.summary.avail_cash));
+  const open = (G.loans || []).find((l) => l.member_id === me.id && ['requested', 'approved', 'active'].includes(l.status));
+  const amount = Math.min(1000, limit) || '';
+  const months = Math.min(2, g.loan_max_months);
+
+  const block = open
+    ? `<div class="warnbox"><strong>You already have a loan ${open.status === 'active' ? 'being repaid' : 'waiting'}.</strong>
+        The group allows one loan at a time, so you can ask again once it is fully repaid.
+        You can still use the calculator below to see how a loan would work.</div>` : '';
+
+  return backTo('loans', 'Loans') + `
+  <h1 class="page-title">Ask for a loan</h1>
+  <p class="lede">The committee will look at your request. The calculation below shows exactly what you would pay back.</p>
+  <div id="ln-errors"></div>${block}
+  <div class="infobox">Your confirmed savings are <strong>${fmtK(saved)}</strong>, so you can borrow up to
+    <strong>${fmtK(limit)}</strong> (${Number(g.loan_multiple)} × your savings).</div>
+  <div class="formcard">
+    <div class="field"><label for="ln-amount">How much do you want to borrow? (K)</label>
+      <input type="number" id="ln-amount" inputmode="decimal" min="0" step="1" value="${amount}"></div>
+    <div class="field"><label for="ln-months">How many months to repay?</label>
+      <select id="ln-months">${Array.from({ length: g.loan_max_months }, (_, i) =>
+        `<option value="${i + 1}"${i + 1 === months ? ' selected' : ''}>${plural(i + 1, 'month', 'months')}</option>`).join('')}</select></div>
+    <div class="calcbox" id="ln-calc" aria-live="polite">${loanCalcBox(g, amount, months)}</div>
+    <div class="field"><label for="ln-purpose">What is the loan for?</label>
+      <input type="text" id="ln-purpose" placeholder="For example: buy stock for my shop">
+      <p class="hint">The committee reads this before voting.</p></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-action="save-loan"${open ? ' disabled' : ''}>Send loan request</button>
+      <button type="button" class="btn ghost" data-action="go" data-screen="loans">Cancel</button>
+    </div>
+    <p class="hint">The group has ${fmtK(avail)} available to lend right now.</p>
+  </div>`;
+}
+
+
+/* ---------- Pop-up boxes for loans ---------- */
+function sendLoanBody(f, l) {
+  const avail = { bank: Number(f.G.summary.avail_bank), momo: Number(f.G.summary.avail_momo), cash: Number(f.G.summary.avail_cash) };
+  const firstOk = ['bank', 'momo', 'cash'].find((k) => avail[k] >= Number(l.amount)) || 'bank';
+  return `<p class="meta">The loan is approved. Record where the money came from, so the committee can trace it.
+    ${esc(firstName(l.member_id))} will be asked to confirm receiving it.</p>
+  <div class="field"><span class="label">Send from</span>
+    <div class="chips" role="radiogroup">${['bank', 'momo', 'cash'].map((k) =>
+      `<label class="chip"><input type="radio" name="sd-from" value="${k}"${k === firstOk ? ' checked' : ''}><span>${esc(placeName(f, k))} (${fmtK(avail[k])})</span></label>`).join('')}</div></div>
+  <div class="field"><label for="sd-ref">Transaction or withdrawal slip number</label>
+    <input type="text" id="sd-ref" autocomplete="off">
+    <p class="hint">For cash, write the receipt number.</p></div>`;
+}
+
+function repayBody(f, l) {
+  const c = loanCalc(f, l);
+  const last = c.reps[c.reps.length - 1];
+  const lastMethod = last ? last.method : '';
+  return `<p class="meta">Still to pay: ${fmtK(c.remaining)}. The monthly amount is ${fmtK(c.monthly)}.</p>
+  <div class="field"><label for="m-amount">Amount repaid (K)</label>
+    <input type="number" id="m-amount" inputmode="decimal" min="0" step="0.01" value="${Math.min(c.monthly, c.remaining)}"></div>
+  <div class="field"><label for="m-date">Date paid</label>
+    <input type="date" id="m-date" value="${toDayText(new Date())}" max="${toDayText(new Date())}"></div>
+  <div class="field"><span class="label">How did they pay?</span>${methodChips('m-method', lastMethod)}</div>
+  ${refField('m', lastMethod)}`;
+}
+
+function repaymentDisputeBody(r) {
+  return `<p class="meta">${fmtK(r.amount)} recorded on ${fmtDate(parseDay(r.paid_on))}.</p>
+  <div class="field"><label for="m-reason">Explain what is wrong</label>
+    <textarea id="m-reason" placeholder="For example: I paid K600, not K400."></textarea>
+    <p class="hint">The committee will see this until it is fixed.</p></div>`;
+}
+
+function repaymentCorrectionBody(r) {
+  return `<p class="meta">The original ${fmtK(r.amount)} entry stays visible. Your correction is added as a new entry,
+    and the borrower will be asked to confirm it.</p>
+  ${r.dispute_reason ? `<p class="note bad"><strong>The borrower said:</strong> "${esc(r.dispute_reason)}"</p>` : ''}
+  <div class="field"><label for="m-amount">Correct amount (K)</label>
+    <input type="number" id="m-amount" inputmode="decimal" min="0" step="0.01" value="${Number(r.amount)}"></div>
+  <div class="field"><span class="label">How did they pay?</span>${methodChips('m-method', r.method)}</div>
+  ${refField('m', r.method, r.reference)}
+  <div class="field"><label for="m-reason">Reason for the correction</label><textarea id="m-reason"></textarea></div>`;
 }

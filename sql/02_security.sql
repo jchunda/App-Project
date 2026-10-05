@@ -211,3 +211,30 @@ drop policy if exists "Members see votes on visible requests" on public.votes;
 create policy "Members see votes on visible requests" on public.votes
   for select to authenticated
   using (exists (select 1 from public.requests r where r.id = request_id));
+
+
+-- =====================================================================
+-- Phase 5: loans and repayments
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- loans: the committee sees every loan; an ordinary member sees only
+-- their own (CLAUDE.md section 7). Everyone still sees the total lent
+-- out, through group_summary. Loans change only through the loan
+-- functions in 03_functions.sql.
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see allowed loans" on public.loans;
+create policy "Members see allowed loans" on public.loans
+  for select to authenticated
+  using (public.is_group_member(group_id)
+         and public.can_see_subject(group_id, member_id));
+
+
+-- ---------------------------------------------------------------------
+-- loan_repayments: visible to whoever can see the loan.
+-- (The rule on loans above is applied inside this check too.)
+-- ---------------------------------------------------------------------
+drop policy if exists "Members see repayments of visible loans" on public.loan_repayments;
+create policy "Members see repayments of visible loans" on public.loan_repayments
+  for select to authenticated
+  using (exists (select 1 from public.loans l where l.id = loan_id));

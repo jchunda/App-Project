@@ -32,7 +32,9 @@ const GROUP_SCREENS = {
   approvals: () => approvalsScreen(),
   request:  () => requestScreen(),
   turns:    () => turnsScreen(),
-  shareout: () => shareoutScreen()
+  shareout: () => shareoutScreen(),
+  loans:    () => loansScreen(),
+  loanreq:  () => loanreqScreen()
 };
 
 
@@ -119,16 +121,21 @@ async function loadGroup(groupId) {
     votes = v.data;
   }
 
-  // Village banking: the share-out, worked out by the database.
-  let shareout = null;
+  // Village banking: the share-out (worked out by the database), loans and repayments.
+  let shareout = null, loans = [], repayments = [];
   if (g.data.type === 'village') {
-    const so = await db.rpc('shareout', { gid: groupId });
-    if (so.error) { toast(friendlyError(so.error)); return false; }
-    shareout = so.data;
+    const [so, ln, rp] = await Promise.all([
+      db.rpc('shareout', { gid: groupId }),
+      db.from('loans').select('*').eq('group_id', groupId),
+      db.from('loan_repayments').select('*').eq('group_id', groupId)
+    ]);
+    error = so.error || ln.error || rp.error;
+    if (error) { toast(friendlyError(error)); return false; }
+    shareout = so.data; loans = ln.data; repayments = rp.data;
   }
 
   S.group = { info: g.data, members: m.data, history: h.data, payments: p.data, deposits: d.data,
-              summary: s.data, requests: r.data, votes, shareout };
+              summary: s.data, requests: r.data, votes, shareout, loans, repayments };
   return true;
 }
 
@@ -571,6 +578,140 @@ function askTypeChange() {
 }
 
 
+/* ---------- Loans ---------- */
+
+// The live calculator on "Ask for a loan".
+function refreshLoanCalc() {
+  const box = document.getElementById('ln-calc');
+  if (box && S.group) box.innerHTML = loanCalcBox(S.group.info, val('ln-amount'), Number(val('ln-months')));
+}
+
+async function saveLoan(button) {
+  const f = groupFacts();
+  const saved = savedBy(f, f.me.id);
+  const limit = round2(saved * Number(f.g.loan_multiple));
+  const avail = round2(Number(f.G.summary.avail_bank) + Number(f.G.summary.avail_momo) + Number(f.G.summary.avail_cash));
+  const amount = parseFloat(val('ln-amount'));
+  const months = Number(val('ln-months'));
+  const purpose = val('ln-purpose').trim();
+
+  const errs = [];
+  if (!(amount > 0)) { errs.push('Enter how much you want to borrow.'); markField('ln-amount', true); }
+  else if (amount > limit + 0.001) { errs.push(`The most you can borrow is ${fmtK(limit)} (${Number(f.g.loan_multiple)} × your savings of ${fmtK(saved)}).`); markField('ln-amount', true); }
+  else if (amount > avail + 0.001) { errs.push(`The group only has ${fmtK(avail)} available to lend right now.`); markField('ln-amount', true); }
+  else markField('ln-amount', false);
+  markField('ln-purpose', purpose.length < 4);
+  if (purpose.length < 4) errs.push('Say what the loan is for. The committee reads this before voting.');
+  showErrors('ln-errors', errs);
+  if (errs.length) return;
+
+  const done = setBusy(button, 'Sending…');
+  const { error } = await db.rpc('ask_loan', { p_group_id: f.g.id, p_amount: round2(amount), p_months: months, p_purpose: purpose });
+  done();
+  if (error) { showErrors('ln-errors', [friendlyError(error)]); return; }
+
+  S.screen = 'loans';
+  await refreshGroup();
+  window.scrollTo(0, 0);
+  toast('Loan request sent to the committee.');
+}
+
+function sendLoan(loanId) {
+  const f = groupFacts();
+  const l = f.G.loans.find((x) => x.id === loanId);
+  openModal(`Send ${fmtK(l.amount)} to ${esc(memberName(l.member_id))}`, sendLoanBody(f, l), 'Record as sent', async () => {
+    const from = radioVal('sd-from');
+    const ref = val('sd-ref').trim();
+    const have = Number(f.G.summary['avail_' + from]);
+    if (have < Number(l.amount) - 0.001) return `Only ${fmtK(have)} is in ${placeName(f, from).toLowerCase()}. Choose another place.`;
+    if (ref.length < 3) return 'Enter the transaction or slip number.';
+    const { error } = await db.rpc('send_loan', { p_loan_id: loanId, p_from_place: from, p_reference: ref });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast(`Loan recorded as sent. ${firstName(l.member_id)} will be asked to confirm.`);
+  });
+}
+
+async function confirmLoanReceived(loanId, button) {
+  const done = setBusy(button, 'Saving…');
+  const { error } = await db.rpc('confirm_loan_received', { p_loan_id: loanId });
+  done();
+  if (error) { toast(friendlyError(error)); return; }
+  await refreshGroup();
+  toast('Thank you. Receipt of the loan is confirmed.');
+}
+
+function recordRepayment(loanId) {
+  const f = groupFacts();
+  const l = f.G.loans.find((x) => x.id === loanId);
+  const c = loanCalc(f, l);
+  openModal(`Record a repayment from ${esc(memberName(l.member_id))}`, repayBody(f, l), 'Save repayment', async () => {
+    const amount = parseFloat(val('m-amount'));
+    const paidOn = val('m-date');
+    const methodId = radioVal('m-method');
+    const ref = val('m-ref').trim();
+    const m = methodId ? method(methodId) : null;
+    if (!(amount > 0)) return 'Enter the amount repaid.';
+    if (amount > c.remaining + 0.001) return `That is more than the ${fmtK(c.remaining)} still to pay.`;
+    if (!paidOn) return 'Choose the date the money was paid.';
+    if (!m) return 'Choose how they paid.';
+    if (m.needsRef && ref.length < 6) return 'Enter the transaction reference from the mobile money message.';
+    const { error } = await db.rpc('record_repayment', {
+      p_loan_id: loanId, p_amount: round2(amount), p_paid_on: paidOn, p_method: methodId,
+      p_reference: m.id === 'cash' ? null : ref
+    });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast(`Repayment saved. ${firstName(l.member_id)} will be asked to confirm it.`);
+  });
+}
+
+async function confirmRepayment(repaymentId, button) {
+  const done = setBusy(button, 'Saving…');
+  const { error } = await db.rpc('answer_repayment', { p_repayment_id: repaymentId, p_answer: 'confirmed', p_reason: null });
+  done();
+  if (error) { toast(friendlyError(error)); return; }
+  await refreshGroup();
+  const r = S.group.repayments.find((x) => x.id === repaymentId);
+  const loan = r && S.group.loans.find((l) => l.id === r.loan_id);
+  toast(loan && loan.status === 'repaid' ? 'Thank you. The loan is now fully repaid.' : 'Thank you. The repayment is confirmed.');
+}
+
+function disputeRepayment(repaymentId) {
+  const r = S.group.repayments.find((x) => x.id === repaymentId);
+  openModal('What is wrong with this repayment?', repaymentDisputeBody(r), 'Mark as wrong', async () => {
+    const reason = val('m-reason').trim();
+    if (reason.length < 5) return 'Please explain what is wrong in a few words.';
+    const { error } = await db.rpc('answer_repayment', { p_repayment_id: repaymentId, p_answer: 'disputed', p_reason: reason });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast('Marked as disputed. The committee can now see it.');
+  }, true);
+}
+
+function correctRepayment(repaymentId) {
+  const r = S.group.repayments.find((x) => x.id === repaymentId);
+  openModal('Fix with a correction', repaymentCorrectionBody(r), 'Save correction', async () => {
+    const amount = parseFloat(val('m-amount'));
+    const methodId = radioVal('m-method');
+    const ref = val('m-ref').trim();
+    const reason = val('m-reason').trim();
+    const m = methodId ? method(methodId) : null;
+    if (!(amount > 0)) return 'Enter the correct amount.';
+    if (!m) return 'Choose how they paid.';
+    if (m.needsRef && ref.length < 6) return 'Enter the transaction reference from the mobile money message.';
+    if (reason.length < 5) return 'Explain why you are making this correction. The committee will read it.';
+    const { error } = await db.rpc('correct_repayment', {
+      p_original_id: repaymentId, p_amount: round2(amount), p_method: methodId,
+      p_reference: m.id === 'cash' ? null : ref, p_reason: reason
+    });
+    if (error) return friendlyError(error);
+    await refreshGroup();
+    toast('Correction saved. The borrower will be asked to confirm it.');
+  });
+}
+
+
 /* ---------- Buttons ---------- */
 
 document.addEventListener('click', async (event) => {
@@ -658,6 +799,35 @@ document.addEventListener('click', async (event) => {
       askTypeChange();
       break;
 
+    // Loans
+    case 'save-loan':
+      await saveLoan(button);
+      break;
+
+    case 'loan-send':
+      sendLoan(button.dataset.id);
+      break;
+
+    case 'loan-received':
+      await confirmLoanReceived(button.dataset.id, button);
+      break;
+
+    case 'loan-repay':
+      recordRepayment(button.dataset.id);
+      break;
+
+    case 'rp-confirm':
+      await confirmRepayment(button.dataset.id, button);
+      break;
+
+    case 'rp-dispute':
+      disputeRepayment(button.dataset.id);
+      break;
+
+    case 'rp-correct':
+      correctRepayment(button.dataset.id);
+      break;
+
     case 'pay-tab':
       S.payTab = button.dataset.tab;
       render(true);
@@ -726,4 +896,10 @@ document.addEventListener('change', (event) => {
   if (t.name === 'm-method') updateRefField('m', t.value);
   if (t.id === 'pay-month') { S.payMonth = t.value; render(true); }
   if (t.name === 'r-kind') { S.reqKind = t.value; render(true); }
+  if (t.id === 'ln-months') refreshLoanCalc();
+});
+
+// Typing an amount on "Ask for a loan" updates the calculator straight away.
+document.addEventListener('input', (event) => {
+  if (event.target.id === 'ln-amount') refreshLoanCalc();
 });

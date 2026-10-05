@@ -622,8 +622,9 @@ $$;
 --   the bank). Waiting and disputed payments count too, because the
 --   money has been handed over. Bank deposits move money from mobile
 --   money or cash into the bank. Approved payouts and spending take
---   money out of the places the treasurer chose.
--- Phase 5 adds loans here.
+--   money out of the places the treasurer chose. Loans leave from the
+--   place they were sent from, and repayments come back to the place
+--   they were paid into.
 -- ---------------------------------------------------------------------
 create or replace function public.group_holdings(gid uuid)
 returns table (bank numeric, momo numeric, cash numeric)
@@ -645,6 +646,14 @@ as $$
     union all
     select 'cash', -from_cash from public.requests
     where group_id = gid and status = 'approved' and kind in ('payout', 'spending')
+    union all
+    select sent_from, -amount from public.loans
+    where group_id = gid and sent_on is not null
+    union all
+    select case when rp.method in ('airtel', 'mtn', 'zamtel') then 'momo' else rp.method end, rp.amount
+    from public.loan_repayments rp
+    where rp.group_id = gid
+      and not exists (select 1 from public.loan_repayments c where c.corrects_id = rp.id)
   )
   select coalesce(sum(amount) filter (where place = 'bank'), 0),
          coalesce(sum(amount) filter (where place = 'momo'), 0),
@@ -703,7 +712,9 @@ begin
     'bank', v_hold.bank,
     'momo', v_hold.momo,
     'cash', v_hold.cash,
-    'lent', 0,   -- loans come in Phase 5
+    -- Loans: still lent out, and interest received (group totals)
+    'lent',              (select coalesce(sum(outstanding), 0) from public.loan_figures(gid)),
+    'interest_received', public.group_interest_received(gid),
     -- What can still be asked for (not promised to a waiting request)
     'avail_bank', v_avail.bank,
     'avail_momo', v_avail.momo,
@@ -1147,8 +1158,9 @@ as $$
     when 'spending' then format('Spend %s: %s', public.fmt_k(r.amount), r.description)
     when 'type_change' then format('Change the group type to %s',
                                    case when r.new_type = 'chilimba' then 'Chilimba' else 'Village Banking' end)
-    when 'loan' then format('Loan of %s to %s', public.fmt_k(r.amount),
-                            (select full_name from public.group_members where id = r.requested_by))
+    when 'loan' then format('Loan of %s to %s for %s month%s', public.fmt_k(r.amount),
+                            (select full_name from public.group_members where id = r.requested_by),
+                            r.loan_months, case when r.loan_months = 1 then '' else 's' end)
     else 'Request' end;
 $$;
 
@@ -1382,6 +1394,9 @@ begin
 
   if v_chair_no or v_no * 2 > v_eligible then
     update public.requests set status = 'rejected', decided_at = now() where id = p_request_id;
+    if v_req.kind = 'loan' then
+      update public.loans set status = 'rejected' where request_id = p_request_id;
+    end if;
     return 'rejected';
   end if;
 
@@ -1393,11 +1408,22 @@ begin
         raise exception 'The group no longer holds enough money in the places this request takes it from. The treasurer should ask again.';
       end if;
     end if;
+    -- A loan can't be larger than the money the group holds.
+    if v_req.kind = 'loan' then
+      select * into v_avail from public.group_available(v_req.group_id);
+      if v_req.amount > v_avail.bank + v_avail.momo + v_avail.cash then
+        raise exception 'The group only has % available, which is less than this loan.',
+          public.fmt_k(v_avail.bank + v_avail.momo + v_avail.cash);
+      end if;
+    end if;
 
     update public.requests set status = 'approved', decided_at = now() where id = p_request_id;
 
     if v_req.kind = 'type_change' then
       update public.groups set next_type = v_req.new_type where id = v_req.group_id;
+    end if;
+    if v_req.kind = 'loan' then
+      update public.loans set status = 'approved' where request_id = p_request_id;
     end if;
     return 'approved';
   end if;
@@ -1448,7 +1474,7 @@ begin
   if tg_op = 'INSERT' then
     perform public.write_history(new.group_id,
       format('Asked for approval: %s.%s', v_title,
-             case when new.kind = 'type_change' then ' Reason: "' || new.description || '"' else '' end),
+             case when new.kind in ('type_change', 'loan') then ' Reason: "' || new.description || '"' else '' end),
       v_subject);
   elsif new.status = 'approved' then
     perform public.write_auto_history(new.group_id,
@@ -1520,8 +1546,9 @@ grant execute on function public.vote_request(uuid, text, text)                 
 
 -- ---------------------------------------------------------------------
 -- group_interest_received: loan interest the group has received, from
--- confirmed repayments. Loans come in Phase 5, which replaces this
--- function with the real sum. Until then it is zero.
+-- confirmed repayments. This first version is zero; the Phase 5 section
+-- below replaces it with the real sum (it needs loan_figures, which is
+-- defined there).
 -- ---------------------------------------------------------------------
 create or replace function public.group_interest_received(gid uuid)
 returns numeric
@@ -1628,3 +1655,539 @@ $$;
 revoke execute on function public.group_interest_received(uuid) from public, anon, authenticated;
 revoke execute on function public.shareout(uuid) from public, anon;
 grant  execute on function public.shareout(uuid) to authenticated;
+
+
+-- =====================================================================
+-- Phase 5: loans (village banking)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- loan_figures: the maths for every loan in a group (CLAUDE.md section 8).
+--   Interest          = amount x rate x months (flat)
+--   Total to repay    = amount + interest
+--   Repaid so far     = all repayments that count (not replaced)
+--   Interest received = the smaller of (confirmed repayments, interest)
+--                       Repayments pay off the interest first.
+--   Still lent out    = amount - the part of repayments above the interest
+--   Due by the end of month (start month + months). Overdue when this
+--   month is later than that and money is still owed.
+-- ---------------------------------------------------------------------
+create or replace function public.loan_figures(gid uuid)
+returns table (
+  loan_id           uuid,
+  member_id         uuid,
+  status            text,
+  interest          numeric,
+  total             numeric,
+  paid              numeric,
+  paid_confirmed    numeric,
+  remaining         numeric,
+  interest_received numeric,
+  outstanding       numeric,
+  due_month         integer,
+  overdue           boolean
+)
+language sql stable security definer set search_path = ''
+as $$
+  select l.id, l.member_id, l.status,
+         x.interest,
+         x.total,
+         r.paid,
+         r.paid_confirmed,
+         greatest(0, x.total - r.paid),
+         least(r.paid_confirmed, x.interest),
+         case when l.sent_on is not null then greatest(0, l.amount - greatest(0, r.paid - x.interest)) else 0 end,
+         l.start_month + l.months,
+         (l.sent_on is not null and x.total - r.paid > 0
+          and public.cycle_month(g.start_month) > l.start_month + l.months)
+  from public.loans l
+  join public.groups g on g.id = l.group_id
+  cross join lateral (
+    select round(l.amount * l.rate / 100 * l.months, 2) as interest,
+           l.amount + round(l.amount * l.rate / 100 * l.months, 2) as total
+  ) x
+  cross join lateral (
+    select coalesce(sum(rp.amount), 0) as paid,
+           coalesce(sum(rp.amount) filter (where rp.status = 'confirmed'), 0) as paid_confirmed
+    from public.loan_repayments rp
+    where rp.loan_id = l.id
+      and not exists (select 1 from public.loan_repayments c where c.corrects_id = rp.id)
+  ) r
+  where l.group_id = gid;
+$$;
+
+
+-- Now that loan_figures exists: the real interest received (replaces
+-- the Phase 4 version that returned zero).
+create or replace function public.group_interest_received(gid uuid)
+returns numeric
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(sum(interest_received), 0) from public.loan_figures(gid);
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- ask_loan: a village banking member asks to borrow. It becomes a loan
+-- request that the committee votes on with the normal approval rules.
+-- Rules (set when the group was created):
+--   - at most loan_multiple x the member's confirmed savings
+--   - at most loan_max_months to repay
+--   - one open loan per member at a time
+--   - not more than the money the group holds
+-- ---------------------------------------------------------------------
+create or replace function public.ask_loan(p_group_id uuid, p_amount numeric, p_months integer, p_purpose text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_group   public.groups;
+  v_me      public.group_members;
+  v_amount  numeric := round(p_amount, 2);
+  v_purpose text    := nullif(trim(coalesce(p_purpose, '')), '');
+  v_saved   numeric;
+  v_limit   numeric;
+  v_avail   record;
+  v_req_id  uuid;
+begin
+  select * into v_group from public.groups where id = p_group_id;
+  select * into v_me from public.group_members where group_id = p_group_id and user_id = auth.uid();
+  if v_me.id is null then
+    raise exception 'You are not a member of this group.';
+  end if;
+  if v_group.type <> 'village' then
+    raise exception 'Loans are only for village banking groups.';
+  end if;
+
+  if exists (select 1 from public.loans where member_id = v_me.id
+             and status in ('requested', 'approved', 'active')) then
+    raise exception 'You already have a loan. You can ask again once it is fully repaid.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter how much you want to borrow.';
+  end if;
+  if p_months is null or p_months not between 1 and v_group.loan_max_months then
+    raise exception 'Choose between 1 and % months to repay.', v_group.loan_max_months;
+  end if;
+  if length(coalesce(v_purpose, '')) < 4 then
+    raise exception 'Say what the loan is for. The committee reads this before voting.';
+  end if;
+
+  select coalesce(sum(amount), 0) into v_saved
+  from public.active_payments(p_group_id)
+  where member_id = v_me.id and kind = 'saving' and status = 'confirmed';
+  v_limit := round(v_saved * v_group.loan_multiple, 2);
+  if v_amount > v_limit then
+    raise exception 'The most you can borrow is % (% times your savings of %).',
+      public.fmt_k(v_limit), public.fmt_num(v_group.loan_multiple), public.fmt_k(v_saved);
+  end if;
+
+  select * into v_avail from public.group_available(p_group_id);
+  if v_amount > v_avail.bank + v_avail.momo + v_avail.cash then
+    raise exception 'The group only has % available to lend right now.',
+      public.fmt_k(v_avail.bank + v_avail.momo + v_avail.cash);
+  end if;
+
+  insert into public.requests (group_id, kind, requested_by, amount, description, loan_months)
+  values (p_group_id, 'loan', v_me.id, v_amount, v_purpose, p_months)
+  returning id into v_req_id;
+
+  insert into public.loans (group_id, member_id, request_id, amount, months, rate, purpose)
+  values (p_group_id, v_me.id, v_req_id, v_amount, p_months, v_group.loan_rate, v_purpose);
+
+  return v_req_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- send_loan: (treasurer) record sending an approved loan: from which
+-- place, and a reference. The loan starts in this month of the cycle.
+-- ---------------------------------------------------------------------
+create or replace function public.send_loan(p_loan_id uuid, p_from_place text, p_reference text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_loan  public.loans;
+  v_group public.groups;
+  v_ref   text := nullif(trim(coalesce(p_reference, '')), '');
+  v_avail record;
+  v_have  numeric;
+begin
+  select * into v_loan from public.loans where id = p_loan_id for update;
+  if not found or not public.has_role(v_loan.group_id, 'treasurer') then
+    raise exception 'Only the treasurer can send loans.';
+  end if;
+  if v_loan.status <> 'approved' then
+    raise exception 'Only approved loans can be sent.';
+  end if;
+  if coalesce(p_from_place, '') not in ('bank', 'momo', 'cash') then
+    raise exception 'Choose where the money is sent from.';
+  end if;
+  if length(coalesce(v_ref, '')) < 3 then
+    raise exception 'Enter the transaction or slip number.';
+  end if;
+
+  select * into v_avail from public.group_available(v_loan.group_id);
+  v_have := case p_from_place when 'bank' then v_avail.bank when 'momo' then v_avail.momo else v_avail.cash end;
+  if v_loan.amount > v_have then
+    raise exception 'Only % is available there. Choose another place.', public.fmt_k(v_have);
+  end if;
+
+  select * into v_group from public.groups where id = v_loan.group_id;
+  update public.loans
+  set status = 'active',
+      sent_from = p_from_place,
+      sent_reference = v_ref,
+      sent_on = public.today_zm(),
+      sent_by = auth.uid(),
+      start_month = greatest(1, least(public.cycle_month(v_group.start_month), v_group.cycle_months))
+  where id = p_loan_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- confirm_loan_received: the borrower confirms they got the money.
+-- ---------------------------------------------------------------------
+create or replace function public.confirm_loan_received(p_loan_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_loan public.loans;
+begin
+  select * into v_loan from public.loans where id = p_loan_id;
+  if not found or not exists (select 1 from public.group_members
+                              where id = v_loan.member_id and user_id = auth.uid()) then
+    raise exception 'Only the borrower can confirm receiving the loan.';
+  end if;
+  if v_loan.sent_on is null then
+    raise exception 'The money has not been sent yet.';
+  end if;
+  if v_loan.received_at is not null then
+    raise exception 'You have already confirmed receiving this loan.';
+  end if;
+  update public.loans set received_at = now() where id = p_loan_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- record_repayment: (treasurer) record money paid back on a loan.
+-- The borrower then confirms or disputes it, like a payment.
+-- ---------------------------------------------------------------------
+create or replace function public.record_repayment(p_loan_id uuid, p_amount numeric, p_paid_on date,
+                                                   p_method text, p_reference text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_loan   public.loans;
+  v_fig    record;
+  v_amount numeric := round(p_amount, 2);
+  v_ref    text    := nullif(trim(coalesce(p_reference, '')), '');
+  v_id     uuid;
+begin
+  select * into v_loan from public.loans where id = p_loan_id;
+  if not found or not public.has_role(v_loan.group_id, 'treasurer') then
+    raise exception 'Only the treasurer can record repayments.';
+  end if;
+  if v_loan.status <> 'active' then
+    raise exception 'Repayments can only be recorded for loans that are being repaid.';
+  end if;
+
+  select * into v_fig from public.loan_figures(v_loan.group_id) where loan_id = p_loan_id;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the amount repaid.';
+  end if;
+  if v_amount > v_fig.remaining then
+    raise exception 'That is more than the % still to pay.', public.fmt_k(v_fig.remaining);
+  end if;
+  if p_paid_on is null or p_paid_on > public.today_zm() then
+    raise exception 'Choose the date the money was paid (not in the future).';
+  end if;
+  if coalesce(p_method, '') not in ('airtel', 'mtn', 'zamtel', 'cash', 'bank') then
+    raise exception 'Choose how they paid.';
+  end if;
+  if p_method in ('airtel', 'mtn', 'zamtel') and length(coalesce(v_ref, '')) < 6 then
+    raise exception 'Enter the transaction reference from the mobile money message.';
+  end if;
+  if p_method = 'cash' then
+    v_ref := null;
+  end if;
+
+  insert into public.loan_repayments (group_id, loan_id, amount, paid_on, method, reference, recorded_by)
+  values (v_loan.group_id, p_loan_id, v_amount, p_paid_on, p_method, v_ref, auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- mark_loan_if_repaid: when confirmed repayments cover the total to
+-- repay, the loan is "Fully repaid".
+-- ---------------------------------------------------------------------
+create or replace function public.mark_loan_if_repaid(p_loan_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_loan public.loans;
+  v_fig  record;
+begin
+  select * into v_loan from public.loans where id = p_loan_id;
+  select * into v_fig from public.loan_figures(v_loan.group_id) where loan_id = p_loan_id;
+  if v_loan.status = 'active' and v_fig.paid_confirmed >= v_fig.total then
+    update public.loans set status = 'repaid' where id = p_loan_id;
+  end if;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- answer_repayment: the borrower confirms or disputes a repayment.
+-- ---------------------------------------------------------------------
+create or replace function public.answer_repayment(p_repayment_id uuid, p_answer text, p_reason text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_rp     public.loan_repayments;
+  v_loan   public.loans;
+  v_reason text := nullif(trim(coalesce(p_reason, '')), '');
+begin
+  select * into v_rp from public.loan_repayments where id = p_repayment_id;
+  select * into v_loan from public.loans where id = v_rp.loan_id;
+  if v_rp.id is null or not exists (select 1 from public.group_members
+                                    where id = v_loan.member_id and user_id = auth.uid()) then
+    raise exception 'Only the borrower can confirm or dispute this repayment.';
+  end if;
+  if exists (select 1 from public.loan_repayments where corrects_id = p_repayment_id) then
+    raise exception 'This repayment was replaced by a correction. Answer the correction instead.';
+  end if;
+  if v_rp.status <> 'waiting' then
+    raise exception 'You have already answered for this repayment.';
+  end if;
+  if p_answer not in ('confirmed', 'disputed') then
+    raise exception 'Choose "Yes, I paid this" or "This is wrong".';
+  end if;
+  if p_answer = 'disputed' and length(coalesce(v_reason, '')) < 5 then
+    raise exception 'Please explain what is wrong in a few words.';
+  end if;
+
+  update public.loan_repayments
+  set status = p_answer,
+      dispute_reason = case when p_answer = 'disputed' then v_reason end,
+      answered_at = now()
+  where id = p_repayment_id;
+
+  perform public.mark_loan_if_repaid(v_loan.id);
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- correct_repayment: (treasurer) fix a repayment mistake. Same idea as
+-- correct_payment: the original stays visible, the borrower confirms.
+-- ---------------------------------------------------------------------
+create or replace function public.correct_repayment(p_original_id uuid, p_amount numeric,
+                                                    p_method text, p_reference text, p_reason text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_orig   public.loan_repayments;
+  v_fig    record;
+  v_amount numeric := round(p_amount, 2);
+  v_ref    text    := nullif(trim(coalesce(p_reference, '')), '');
+  v_reason text    := nullif(trim(coalesce(p_reason, '')), '');
+  v_id     uuid;
+begin
+  select * into v_orig from public.loan_repayments where id = p_original_id;
+  if not found or not public.has_role(v_orig.group_id, 'treasurer') then
+    raise exception 'Only the treasurer can add corrections.';
+  end if;
+  if exists (select 1 from public.loan_repayments where corrects_id = p_original_id) then
+    raise exception 'This repayment has already been corrected. Correct the newest entry instead.';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Enter the correct amount.';
+  end if;
+  select * into v_fig from public.loan_figures(v_orig.group_id) where loan_id = v_orig.loan_id;
+  if v_amount > v_fig.remaining + v_orig.amount then
+    raise exception 'That is more than the % still to pay.', public.fmt_k(v_fig.remaining + v_orig.amount);
+  end if;
+  if coalesce(p_method, '') not in ('airtel', 'mtn', 'zamtel', 'cash', 'bank') then
+    raise exception 'Choose how they paid.';
+  end if;
+  if p_method in ('airtel', 'mtn', 'zamtel') and length(coalesce(v_ref, '')) < 6 then
+    raise exception 'Enter the transaction reference from the mobile money message.';
+  end if;
+  if p_method = 'cash' then
+    v_ref := null;
+  end if;
+  if length(coalesce(v_reason, '')) < 5 then
+    raise exception 'Explain why you are making this correction. The committee will read it.';
+  end if;
+
+  insert into public.loan_repayments (group_id, loan_id, amount, paid_on, method, reference,
+                                      recorded_by, corrects_id, correction_reason)
+  values (v_orig.group_id, v_orig.loan_id, v_amount, v_orig.paid_on, p_method, v_ref,
+          auth.uid(), v_orig.id, v_reason)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- Records can never be edited: repayments use the same protection as
+-- payments, and loans may only move forward through their steps.
+-- ---------------------------------------------------------------------
+drop trigger if exists protect_repayment on public.loan_repayments;
+create trigger protect_repayment
+  before update on public.loan_repayments
+  for each row execute function public.protect_answered_record();
+
+create or replace function public.protect_loan()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+declare
+  changeable text[] := array['status', 'start_month', 'sent_from', 'sent_reference', 'sent_on', 'sent_by', 'received_at'];
+begin
+  if (to_jsonb(new) - changeable) is distinct from (to_jsonb(old) - changeable) then
+    raise exception 'Loans can never be changed.';
+  end if;
+  -- Once sent or received, those details are fixed.
+  if old.sent_on is not null and (to_jsonb(new) -> 'sent_reference', to_jsonb(new) -> 'sent_from', new.sent_on, new.start_month)
+     is distinct from (to_jsonb(old) -> 'sent_reference', to_jsonb(old) -> 'sent_from', old.sent_on, old.start_month) then
+    raise exception 'A sent loan can''t be changed.';
+  end if;
+  if old.received_at is not null and new.received_at is distinct from old.received_at then
+    raise exception 'Receipt of this loan is already confirmed.';
+  end if;
+  if old.status in ('rejected', 'repaid') then
+    raise exception 'This loan is closed.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_loan on public.loans;
+create trigger protect_loan
+  before update on public.loans
+  for each row execute function public.protect_loan();
+
+
+-- ---------------------------------------------------------------------
+-- History for loans and repayments, written by triggers. Every entry's
+-- subject is the borrower, so in village banking only the borrower and
+-- the committee see it (privacy rules).
+-- ---------------------------------------------------------------------
+create or replace function public.loans_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_name  text;
+  v_start date;
+  v_place text;
+begin
+  select full_name into v_name from public.group_members where id = new.member_id;
+  select start_month into v_start from public.groups where id = new.group_id;
+
+  if old.sent_on is null and new.sent_on is not null then
+    v_place := case new.sent_from when 'bank' then 'the group bank account'
+                                  when 'momo' then 'mobile money' else 'cash' end;
+    perform public.write_history(new.group_id,
+      format('Sent the %s loan to %s from %s. Reference: %s. To be repaid by the end of %s.',
+             public.fmt_k(new.amount), v_name, v_place, new.sent_reference,
+             public.month_label(v_start, new.start_month + new.months)),
+      new.member_id);
+  end if;
+
+  if old.received_at is null and new.received_at is not null then
+    perform public.write_history(new.group_id,
+      format('Confirmed receiving the %s loan.', public.fmt_k(new.amount)), new.member_id);
+  end if;
+
+  if old.status <> 'repaid' and new.status = 'repaid' then
+    perform public.write_auto_history(new.group_id,
+      format('%s''s loan of %s is fully repaid.', v_name, public.fmt_k(new.amount)), new.member_id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists loans_history on public.loans;
+create trigger loans_history
+  after update on public.loans
+  for each row execute function public.loans_history();
+
+
+create or replace function public.repayments_history()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_loan public.loans;
+  v_name text;
+  v_orig public.loan_repayments;
+begin
+  select * into v_loan from public.loans where id = new.loan_id;
+  select full_name into v_name from public.group_members where id = v_loan.member_id;
+
+  if tg_op = 'INSERT' and new.corrects_id is null then
+    perform public.write_history(new.group_id,
+      format('Recorded a loan repayment of %s from %s. Paid by %s%s.',
+             public.fmt_k(new.amount), v_name, public.method_label(new.method),
+             case when new.reference is not null then ', reference ' || new.reference else '' end),
+      v_loan.member_id);
+  elsif tg_op = 'INSERT' then
+    select * into v_orig from public.loan_repayments where id = new.corrects_id;
+    perform public.write_history(new.group_id,
+      format('Added a correction to %s''s loan repayment: %s changed to %s. Reason: "%s". The original entry is kept.',
+             v_name, public.fmt_k(v_orig.amount), public.fmt_k(new.amount), new.correction_reason),
+      v_loan.member_id);
+  elsif new.status = 'confirmed' and old.status <> 'confirmed' then
+    perform public.write_history(new.group_id,
+      format('Confirmed the %s loan repayment is correct.', public.fmt_k(new.amount)), v_loan.member_id);
+  elsif new.status = 'disputed' and old.status <> 'disputed' then
+    perform public.write_history(new.group_id,
+      format('Said the %s loan repayment is wrong: "%s"', public.fmt_k(new.amount), new.dispute_reason),
+      v_loan.member_id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists repayments_history on public.loan_repayments;
+create trigger repayments_history
+  after insert or update of status on public.loan_repayments
+  for each row execute function public.repayments_history();
+
+
+-- ---------------------------------------------------------------------
+-- Who may use the Phase 5 functions.
+-- ---------------------------------------------------------------------
+revoke execute on function public.loan_figures(uuid)            from public, anon, authenticated;
+revoke execute on function public.group_interest_received(uuid) from public, anon, authenticated;
+revoke execute on function public.mark_loan_if_repaid(uuid)     from public, anon, authenticated;
+
+revoke execute on function public.ask_loan(uuid, numeric, integer, text)                     from public, anon;
+revoke execute on function public.send_loan(uuid, text, text)                               from public, anon;
+revoke execute on function public.confirm_loan_received(uuid)                               from public, anon;
+revoke execute on function public.record_repayment(uuid, numeric, date, text, text)         from public, anon;
+revoke execute on function public.answer_repayment(uuid, text, text)                        from public, anon;
+revoke execute on function public.correct_repayment(uuid, numeric, text, text, text)        from public, anon;
+
+grant execute on function public.ask_loan(uuid, numeric, integer, text)                     to authenticated;
+grant execute on function public.send_loan(uuid, text, text)                               to authenticated;
+grant execute on function public.confirm_loan_received(uuid)                               to authenticated;
+grant execute on function public.record_repayment(uuid, numeric, date, text, text)         to authenticated;
+grant execute on function public.answer_repayment(uuid, text, text)                        to authenticated;
+grant execute on function public.correct_repayment(uuid, numeric, text, text, text)        to authenticated;

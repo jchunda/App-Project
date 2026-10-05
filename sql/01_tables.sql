@@ -276,6 +276,10 @@ alter table public.votes  add column if not exists reason text;   -- why someone
 alter table public.groups add column if not exists next_type text -- approved type change, starts next cycle
   check (next_type in ('chilimba', 'village'));
 
+-- Added in Phase 5.
+alter table public.requests add column if not exists loan_months integer   -- loan requests: months to repay
+  check (loan_months between 1 and 12);
+
 
 -- ---------------------------------------------------------------------
 -- Indexes: these make common lookups faster (like an index in a book).
